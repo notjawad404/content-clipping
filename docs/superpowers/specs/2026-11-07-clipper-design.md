@@ -109,7 +109,7 @@ Process Claude follows (defined in SKILL.md):
       "end_sentence": "S0419",
       "hook_text": "NOBODY TALKS ABOUT THIS",
       "title": "Why going viral means doing what's never been done",
-      "score": 8.6,
+      "score": 8.7,
       "scores": {"hook": 5, "standalone": 4, "payoff": 5, "emotion": 4, "novelty": 4, "shareability": 4},
       "reason": "Bold claim opener, concrete example, punchline at end.",
       "emphasis_words": ["viral", "never", "million"],

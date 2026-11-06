@@ -13,6 +13,12 @@ LINGER = 0.3    # keep a group on screen this long after its last word (unless t
 POP = r"\fscx85\fscy85\t(0,80,\fscx100\fscy100)"
 
 
+def _ass_safe(text: str) -> str:
+    """Neutralise anything libass would parse: newlines, override blocks and backslashes."""
+    text = text.replace("\\", "/").replace("\r", "")
+    return text.replace("\n", "\\N").replace("{", "(").replace("}", ")")
+
+
 def clean(word: str) -> str:
     return EDGE_PUNCT.sub("", word)
 
@@ -81,7 +87,7 @@ def build_ass(groups: list[dict], cfg: dict, segments: list[dict], hook_text: st
         bold=False, borderstyle=3, outline=14, shadow=0,
         alignment=pysubs2.Alignment.TOP_CENTER, marginl=90, marginr=140, marginv=hk["margin_top"])
     if hook_text and hk["enabled"]:
-        subs.append(pysubs2.SSAEvent(start=0, end=_ms(hk["duration"]), style="Hook", text=hook_text.upper()))
+        subs.append(pysubs2.SSAEvent(start=0, end=_ms(hk["duration"]), style="Hook", text=_ass_safe(hook_text.upper())))
     hl, base = ass_color(c["highlight_color"]), ass_color(c["color"])
     for g in groups:
         y = c["split_y"] if _layout_at(segments, g["start"]) == "split" else c["y"]
@@ -91,7 +97,7 @@ def build_ass(groups: list[dict], cfg: dict, segments: list[dict], hook_text: st
             e = g["words"][i + 1]["s"] if i + 1 < n else g["end"]
             if e <= s:
                 continue
-            parts = [f"{{\\c{hl if (j == i or w['key'] in emphasis) else base}}}{w['text']}"
+            parts = [f"{{\\c{hl if (j == i or w['key'] in emphasis) else base}}}{_ass_safe(w['text'])}"
                      for j, w in enumerate(g["words"])]
             head = f"{{\\an5\\pos({c['x']},{y}){POP if i == 0 else ''}}}"
             subs.append(pysubs2.SSAEvent(start=_ms(s), end=_ms(e), style="Cap", text=head + " ".join(parts)))

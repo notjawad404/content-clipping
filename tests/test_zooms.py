@@ -28,3 +28,10 @@ def test_no_zoom_in_split_or_fit_or_when_disabled():
     assert plan_zooms(split, [4.0, 8.0], 20.0, CFG) == []
     off = {"zoom": {**CFG["zoom"], "enabled": False}}
     assert plan_zooms(FILL, [4.0, 8.0], 20.0, off) == []
+
+
+def test_non_positive_gaps_do_not_hang():
+    toggles = toggle_times([5, 10], 30, 0.0, 7.0)
+    assert toggles and all(b > a for a, b in zip(toggles, toggles[1:]))
+    toggles = toggle_times([], 30, -1.0, 0.0)
+    assert toggles and all(b > a for a, b in zip(toggles, toggles[1:]))

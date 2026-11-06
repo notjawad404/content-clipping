@@ -1,3 +1,5 @@
+import re
+
 from clipper.captions import ass_color, build_ass, clean, group_words
 from clipper.config import load_config
 
@@ -74,3 +76,16 @@ def test_default_caption_and_hook_positions_are_in_safe_zone():
     for y in (c["y"], c["split_y"]):
         assert 270 <= y - c["size"] / 2 and y + c["size"] / 2 <= 1250
     assert hk["margin_top"] >= 270
+
+
+def test_build_ass_escapes_hook_and_caption_text():
+    cfg = load_config()
+    groups = group_words([w("a{b}", 0.0, 0.3), w("c\\d", 0.4, 0.7)])
+    subs = build_ass(groups, cfg, [{"start": 0, "end": 5, "layout": "fill"}], "Line one\nLine {two}", set())
+    hooks = [e for e in subs if e.style == "Hook"]
+    assert len(hooks) == 1
+    assert "\\N" in hooks[0].text and "\n" not in hooks[0].text and "{" not in hooks[0].text
+    for e in subs:
+        if e.style == "Cap":
+            stripped = re.sub(r"\{\\[^{}]*\}", "", e.text)  # drop the override tags the code itself emits
+            assert "{" not in stripped and "}" not in stripped and "\\" not in stripped

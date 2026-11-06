@@ -4,6 +4,8 @@ from __future__ import annotations
 
 def toggle_times(anchors: list[float], duration: float, min_gap: float, max_gap: float) -> list[float]:
     """Times where the zoom state flips (in, out, in, ...). Prefer anchors (sentence ends, emphasis words)."""
+    min_gap = max(min_gap, 0.5)  # non-positive gaps (from overrides.yaml) would loop forever
+    max_gap = max(max_gap, min_gap)
     toggles: list[float] = []
     last = 0.0
     pending = sorted(a for a in anchors if 0 < a < duration - 1.0)

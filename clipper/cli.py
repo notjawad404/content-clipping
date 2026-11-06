@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import sys
 import traceback
 from pathlib import Path
 
@@ -35,15 +37,20 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         load_config(args.campaign)  # fail fast on an unknown campaign
     job = job_for(video_id)
     job.ensure_dirs()
-    job.write_json(job.job_file, {"url": args.url, "campaign": args.campaign, "cookies_browser": args.cookies_from_browser})
+    prev = job.read_json(job.job_file) if job.job_file.exists() else {}
+    campaign = args.campaign or prev.get("campaign")  # sticky: a rerun must not drop the campaign's required text/tags
+    cookies_browser = args.cookies_from_browser or prev.get("cookies_browser")
+    if campaign and not args.campaign:
+        load_config(campaign)
+    job.write_json(job.job_file, {"url": args.url, "campaign": campaign, "cookies_browser": cookies_browser})
     force = set(args.force or [])
     if "meta" in force or not job.meta.exists():
         with timed(job, "fetch_meta"):
-            fetch.fetch_meta(job, args.url, args.cookies_from_browser)
+            fetch.fetch_meta(job, args.url, cookies_browser)
     if force & {"audio", "transcribe"} or not job.sentences_txt.exists():
         if "audio" in force or job.audio() is None:
             with timed(job, "fetch_audio"):
-                fetch.fetch_audio(job, args.url, args.cookies_from_browser)
+                fetch.fetch_audio(job, args.url, cookies_browser)
         with timed(job, "transcribe"):
             transcribe.run(job)
     meta = job.read_json(job.meta)
@@ -97,9 +104,10 @@ def _produce_one(job: Job, clip: dict, cfg: dict, info: dict, meta: dict, words:
             reframe.run(job, clip, words, meta["duration"])
     out = job.out / f"{cid}.mp4"
     out_print = job.render_dir / f"{cid}.json"
-    render_print = {"fast": bool(cfg["render"]["fast"]), "start": clip["start"], "end": clip["end"]}
-    if ("render" in force or not is_fresh(out, [crops, job.clips_resolved, job.overrides])
-            or _read_fingerprint(out_print) != render_print):
+    cfg_hash = hashlib.sha256(json.dumps(cfg, sort_keys=True, default=str).encode()).hexdigest()
+    render_print = {"fast": bool(cfg["render"]["fast"]), "start": clip["start"], "end": clip["end"], "cfg": cfg_hash,
+                    "hook_text": clip.get("hook_text"), "emphasis_words": clip.get("emphasis_words", [])}
+    if ("render" in force or not is_fresh(out, [crops]) or _read_fingerprint(out_print) != render_print):
         with timed(job, f"render_{cid}"):
             render.render_clip(job, clip, cfg, words, meta["duration"])
         _write_fingerprint(out_print, render_print)
@@ -119,8 +127,12 @@ def cmd_produce(args: argparse.Namespace) -> int:
     frames: dict[str, list[str]] = {}
     attempted_ok = False
     force = set(args.force or [])
+    bot_check = False
     for clip in resolved["clips"]:
         if args.only and clip["id"] not in args.only:
+            continue
+        if bot_check:  # stop hammering YouTube; the user must decide on cookies first
+            results[clip["id"]] = "skipped: YouTube bot check"
             continue
         try:
             frames[clip["id"]] = _produce_one(job, clip, cfg, info, meta, words, force)
@@ -128,8 +140,15 @@ def cmd_produce(args: argparse.Namespace) -> int:
             attempted_ok = True
         except Exception as exc:  # one broken clip must never stop the rest
             (job.logs_dir / f"{clip['id']}_error.log").write_text(traceback.format_exc())
-            first_line = str(exc).splitlines()[0] if str(exc) else ""
-            results[clip["id"]] = f"{type(exc).__name__}: {first_line}"
+            lines = str(exc).splitlines()
+            first_line = lines[0] if lines else ""
+            if isinstance(exc, FetchError) and "bot check" in str(exc).lower():
+                bot_check = True
+                hint = lines[-1] if len(lines) > 1 else first_line
+                results[clip["id"]] = f"{type(exc).__name__}: {first_line} | {hint}"
+                print(hint, file=sys.stderr)
+            else:
+                results[clip["id"]] = f"{type(exc).__name__}: {first_line}"
     job.write_json(job.results, results)
     timings = job.read_json(job.timings) if job.timings.exists() else {}
     (job.out / "summary.md").write_text(package.summary_markdown(meta, resolved, results, timings))

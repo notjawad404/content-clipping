@@ -108,3 +108,28 @@ def test_clip_words_are_relative_to_clip_start():
 def test_sentence_end_times():
     cw = [{"w": "Hi", "s": 0.0, "e": 0.2}, {"w": "there.", "s": 0.3, "e": 0.6}, {"w": "Ok", "s": 1.0, "e": 1.2}]
     assert sentence_end_times(cw) == [0.6]
+
+
+def test_snap_bounds_never_cuts_into_own_words_when_neighbours_overlap():
+    words = [{"w": "a", "s": 0.0, "e": 1.05}, {"w": "b", "s": 1.0, "e": 1.5},
+             {"w": "c", "s": 2.0, "e": 2.6}, {"w": "d", "s": 2.5, "e": 3.0}]
+    start, end = snap_bounds(words, 1, 2)
+    assert start <= 1.0 and end >= 2.6
+    clip = {"start": start, "first_word": 1, "last_word": 2}
+    assert clip_words(words, clip)[0]["s"] >= 0.0
+
+
+def test_compose_post_keeps_numbers_and_mid_sentence_hashtags():
+    out = compose_post("The #1 mistake founders make. Why #AI changes everything", CFG, "instagram")
+    assert out == "The #1 mistake founders make. Why #AI changes everything"
+
+
+def test_compose_post_midsentence_tags_count_toward_cap_and_are_not_duplicated():
+    cfg = {**CFG, "required_tags": ["#req"], "max_hashtags": 3}
+    out = compose_post("Why #AI wins #a #b #c", cfg, "instagram")
+    assert out == "Why #AI wins\n#req #a"
+
+
+def test_compose_post_trailing_tags_on_own_line_are_relocated():
+    out = compose_post("Big idea\n#x #X #y", CFG, "tiktok")
+    assert out == "Big idea\n#x #y"

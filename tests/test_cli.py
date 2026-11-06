@@ -1,5 +1,8 @@
+import yaml
+
 from clipper import cli
 from clipper.cli import build_parser
+from clipper.fetch import FetchError
 from clipper.jobs import job_for
 
 
@@ -124,3 +127,71 @@ def test_exit_code_reflects_only_clips_attempted_in_this_run(tmp_path, monkeypat
     assert st.job.read_json(st.job.results) == {"clip_01": None, "clip_02": "RuntimeError: boom"}
     assert cli.main(["produce", "vid", "--only", "clip_99"]) == 1  # nothing attempted
     capsys.readouterr()
+
+
+def test_prepare_keeps_campaign_and_cookies_when_rerun_without_flags(tmp_path, monkeypatch, capsys):
+    job = job_for("abcdefghijk", jobs_dir=tmp_path / "jobs", output_dir=tmp_path / "out")
+    url = "https://www.youtube.com/watch?v=abcdefghijk"
+
+    def fake_meta(job_, url_, cookies=None):
+        job_.write_json(job_.meta, {"title": "T", "channel": "C", "duration": 100.0, "url": url})
+
+    def fake_transcribe(job_):
+        job_.write_json(job_.sentences_json, [])
+        job_.sentences_txt.write_text("")
+
+    monkeypatch.setattr(cli, "job_for", lambda video_id: job)
+    monkeypatch.setattr(cli.doctor, "check_disk", lambda root: type("D", (), {"ok": True})())
+    monkeypatch.setattr(cli.fetch, "fetch_meta", fake_meta)
+    monkeypatch.setattr(cli.fetch, "fetch_audio", lambda j, u, c=None: (j.root / "audio.m4a").write_bytes(b"a"))
+    monkeypatch.setattr(cli.transcribe, "run", fake_transcribe)
+
+    assert cli.main(["prepare", url, "--campaign", "example", "--cookies-from-browser", "chrome"]) == 0
+    assert cli.main(["prepare", url]) == 0
+    saved = job.read_json(job.job_file)
+    assert saved["campaign"] == "example" and saved["cookies_browser"] == "chrome"
+    assert cli.main(["prepare", url, "--cookies-from-browser", "firefox"]) == 0
+    assert job.read_json(job.job_file)["cookies_browser"] == "firefox"
+    assert job.read_json(job.job_file)["campaign"] == "example"
+    capsys.readouterr()
+
+
+def test_resolve_alone_does_not_rerender_but_content_changes_do(tmp_path, monkeypatch):
+    st = Stages(tmp_path, monkeypatch, clip_ids=("clip_01", "clip_02"))
+    assert cli.main(["produce", "vid"]) == 0
+    assert st.renders == ["clip_01", "clip_02"]
+    st.write_clips([make_clip("clip_01"), make_clip("clip_02")])  # what `resolve` does: rewrite the same content
+    st.job.overrides.write_text("review_first: false\n")          # touching overrides alone must not matter
+    assert cli.main(["produce", "vid"]) == 0
+    assert st.renders == ["clip_01", "clip_02"]
+    changed = make_clip("clip_02")
+    changed["hook_text"] = "NEW HOOK"
+    st.write_clips([make_clip("clip_01"), changed])
+    assert cli.main(["produce", "vid"]) == 0
+    assert st.renders == ["clip_01", "clip_02", "clip_02"]
+    st.job.overrides.write_text(yaml.safe_dump({"captions": {"size": 99}}))
+    assert cli.main(["produce", "vid"]) == 0
+    assert st.renders == ["clip_01", "clip_02", "clip_02", "clip_01", "clip_02"]
+    assert cli.main(["produce", "vid"]) == 0
+    assert len(st.renders) == 5
+    assert len(st.fetches) == 2
+
+
+def test_bot_check_stops_fetching_and_records_hint(tmp_path, monkeypatch, capsys):
+    st = Stages(tmp_path, monkeypatch, clip_ids=("clip_01", "clip_02", "clip_03"))
+    calls = []
+
+    def blocked(job_, url_, clip, duration, cookies=None):
+        calls.append(clip["id"])
+        raise FetchError("yt-dlp failed (exit 1), log: x\nSign in to confirm you're not a bot\n"
+                         "YouTube bot check: ask the user before retrying with --cookies-from-browser.")
+
+    monkeypatch.setattr(cli.fetch, "fetch_section", blocked)
+    assert cli.main(["produce", "vid"]) == 1
+    assert calls == ["clip_01"]
+    results = st.job.read_json(st.job.results)
+    assert "bot check" in results["clip_01"].lower() and "--cookies-from-browser" in results["clip_01"]
+    assert results["clip_02"] == results["clip_03"] == "skipped: YouTube bot check"
+    assert (st.job.out / "summary.md").exists()
+    captured = capsys.readouterr()
+    assert "YouTube bot check" in captured.out + captured.err

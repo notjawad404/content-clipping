@@ -32,9 +32,9 @@ Run `uv run clipper doctor`. If anything fails, run the printed fix (`brew insta
 
 ## 2. Prepare
 
-`uv run clipper prepare "<url>" [--campaign <name>]`
+`uv run clipper prepare "<url>" [--campaign <name>]`: run it with `run_in_background: true` (a 1-2 hour episode needs audio download plus transcription, and the first run also downloads the ~1.2 GB Parakeet model, so it can exceed the Bash timeout), then wait for it to finish.
 
-It prints JSON with `video_id`, the transcript path and where to write `clips.json`. The first run downloads the Parakeet model (~1.2 GB). If the error mentions a YouTube bot check, STOP and ask the user whether to retry with `--cookies-from-browser chrome` (YouTube may flag the Google account).
+It prints JSON with `video_id`, the transcript path and where to write `clips.json`. The campaign and cookies choice are remembered in `job.json`, so rerunning `prepare` without those flags keeps them. If the error mentions a YouTube bot check, STOP and ask the user whether to retry with `--cookies-from-browser chrome` (YouTube may flag the Google account).
 
 ## 3. Select clips (your job)
 
@@ -62,7 +62,7 @@ Write `jobs/<video_id>/clips.json`:
       "end_sentence": "S0419",
       "hook_text": "NOBODY TALKS ABOUT THIS",
       "title": "Why going viral means doing what's never been done",
-      "score": 8.6,
+      "score": 8.7,
       "scores": {"hook": 5, "standalone": 4, "payoff": 5, "emotion": 4, "novelty": 4, "shareability": 4},
       "reason": "Bold claim opener, concrete example, punchline at the end.",
       "emphasis_words": ["viral", "never", "million"],
@@ -82,18 +82,21 @@ Field rules:
 - `id`: `clip_01`, `clip_02`, … in rank order.
 - `hook_text`: 3–8 punchy words shown on screen for the first 2.5 s. Not the same as the first spoken words.
 - `emphasis_words`: 2–6 single lowercase words from the clip worth highlighting (numbers, names, emotional words).
-- `post.*`: one caption per platform: a short hook line, one sentence of context, up to 3 hashtags. Code appends the campaign's required text, creator tag and required hashtags and caps hashtags at 5, so don't repeat them. X must fit 280 characters.
+- `post.*`: one caption per platform: a short hook line, one sentence of context, up to 3 hashtags. Put hashtags only at the end of each caption. Code appends the campaign's required text, creator tag and required hashtags and caps hashtags at 5, so don't repeat them. X must fit 280 characters.
 
 ## 4. Resolve
 
 `uv run clipper resolve <video_id>` prints `OK`/`SKIP` per clip.
 - Schema error: fix `clips.json` and rerun.
 - Clips skipped and you have strong unused candidates: add them with new ids and rerun.
+- If every clip is skipped, read the SKIP reasons, adjust boundaries or picks in `clips.json`, and resolve again.
 - If it prints `review_first: true`: show the user a table (id, score, length, title, hook text, source time) and STOP until they approve or edit. Apply edits to `clips.json` and resolve again.
 
 ## 5. Produce
 
 `uv run clipper produce <video_id>`: run it with `run_in_background: true` because 8 clips can exceed the 10-minute command limit, then wait for it to finish. One clip only: `--only clip_03`. The JSON output lists `results` (`null` = success) and `qa_frames`.
+
+If a result mentions a YouTube bot check, produce has stopped fetching (remaining clips show `skipped: YouTube bot check`). Ask the user, then rerun `uv run clipper prepare "<url>" --cookies-from-browser chrome` (the campaign is remembered and everything else is cached) and rerun produce.
 
 ## 6. QA (your job)
 
@@ -103,7 +106,7 @@ Open every QA frame image with the Read tool. For each clip check:
 - the hook box is visible at the top in the first frame;
 - no black or frozen frames.
 
-To fix, edit `overrides.yaml` (e.g. `captions: {y: 1180}`) and rerun once with `uv run clipper produce <video_id> --only clip_XX --force render` (or `--force reframe render` for framing problems). If it is still wrong, report it. Never hide a failure.
+To fix, edit `overrides.yaml` (e.g. `captions: {y: 1180}`). It is global for the job, so a fix made for one clip also applies to any later re-render of the other clips. Rerun once with `uv run clipper produce <video_id> --only clip_XX --force render` (or `--force reframe render` for framing problems). If it is still wrong, report it. Never hide a failure.
 
 ## 7. Finish
 
