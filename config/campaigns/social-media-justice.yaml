@@ -1,0 +1,18 @@
+# Content Rewards campaign: AJ / Social Media Justice (social media addiction awareness)
+# Platforms: TikTok, Instagram Reels, YouTube Shorts only (NOT X). Minimum 5,000 views for payout.
+# Account bio must carry AJ's website link: https://socialmediajusticereview.com/
+creator_tag: ""                 # fill in AJ's @handle per platform if the brief requires tagging
+required_text: ""
+required_tags: ["#AwesomeLawyer"]
+banned_topics:
+  - shaming or mocking people who struggle with addiction
+  - self-harm (showing or describing it)
+  - hate farming, rage-bait, pile-on or drama framing
+  - anything unsuitable for a young audience
+  - logos of any kind on screen
+brief: >
+  Every clip must clearly convey the message of social media addiction, sourced from
+  AJ's Social Media Justice video. Look for funny moments, memorable quotes, reactions
+  and memorable moments. Content must be suitable for a young audience. Captions must
+  use #AwesomeLawyer. No mocking or shaming of people who struggle with addiction.
+length: {min: 20, max: 90}
