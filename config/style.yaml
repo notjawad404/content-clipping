@@ -40,7 +40,7 @@ zoom:
   max_gap: 7.0
 
 sfx:
-  enabled: true
+  enabled: false   # owner preference: no sound effects in clips
   gain_db: -18
 
 render:

@@ -17,7 +17,7 @@ In Claude Code, in this folder:
 
 > Run the clipper on https://www.youtube.com/watch?v=… for the `<campaign>` campaign
 
-Add tweaks in plain words: "only the best 3", "under 30 seconds", "no sound effects", "blue captions", "review first".
+Add tweaks in plain words: "only the best 3", "under 30 seconds", "no zooms", "blue captions", "review first". Clips have no sound effects.
 
 Clips land in `output/<video_id>/`: `clip_XX.mp4`, `clip_XX_post.md` (captions per platform) and `summary.md`.
 

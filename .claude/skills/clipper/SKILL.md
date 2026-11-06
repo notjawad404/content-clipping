@@ -24,7 +24,6 @@ Run `uv run clipper doctor`. If anything fails, run the printed fix (`brew insta
 | "under 30 seconds" | `length: {max: 30, target_max: 30}` |
 | "under 15 seconds" | `length: {min: 8, max: 15, target_min: 8, target_max: 15}` |
 | "only the best 3" / "just the best clip" | `max_clips: 3` / `max_clips: 1` |
-| "no sound effects" | `sfx: {enabled: false}` |
 | "no zooms" | `zoom: {enabled: false}` |
 | "blue captions" (any colour) | `captions: {highlight_color: "#2D9CFF"}` (pick a fitting hex) |
 | "review first" / "let me approve" | `review_first: true` |
