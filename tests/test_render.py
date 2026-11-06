@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -58,6 +59,31 @@ def test_encode_args_quality_and_fast_modes():
     assert "+faststart" in args
     cfg["render"]["fast"] = True
     assert "h264_videotoolbox" in encode_args(cfg)
+
+
+def test_failed_final_pass_leaves_no_output_file(tmp_path, monkeypatch):
+    job = job_for("vid", jobs_dir=tmp_path / "jobs", output_dir=tmp_path / "out")
+    job.ensure_dirs()
+    clip = {"id": "clip_01", "start": 2.0, "end": 10.0, "duration": 8.0, "first_word": 0, "last_word": 1,
+            "hook_text": "Hook", "emphasis_words": []}
+    words = [{"i": 0, "w": "Make", "s": 2.2, "e": 2.5}, {"i": 1, "w": "money.", "s": 2.6, "e": 3.0}]
+    job.write_json(job.crops_dir / "clip_01.json", {"clip_id": "clip_01", "segments": [FILL | {"end": 8.0}]})
+    loudnorm = ('{"input_i": "-23.0", "input_tp": "-4.0", "input_lra": "6.0", '
+                '"input_thresh": "-34.0", "target_offset": "0.2"}')
+    calls = []
+
+    def fake_run(cmd, cwd, log):
+        calls.append(cmd)
+        if len(calls) == 1:  # loudnorm measurement
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr=f"noise\n{loudnorm}\n")
+        Path(cmd[-1]).write_bytes(b"half an mp4")  # ffmpeg had started writing, then died
+        raise render.RenderError("ffmpeg failed (exit 1)")
+
+    monkeypatch.setattr(render, "_run", fake_run)
+    with pytest.raises(render.RenderError):
+        render.render_clip(job, clip, load_config(), words, meta_duration=100.0)
+    assert len(calls) == 2
+    assert not (job.out / "clip_01.mp4").exists() and not (job.out / "clip_01.partial.mp4").exists()
 
 
 @pytest.mark.integration

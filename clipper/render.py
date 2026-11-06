@@ -168,7 +168,13 @@ def render_clip(job: Job, clip: dict, cfg: dict, words: list[dict], meta_duratio
 
     out = job.out / f"{cid}.mp4"
     graph = video_graph(pieces, cfg["render"]["fps"], ass_name) + ";" + audio_graph(sfx_times, gain, loudnorm_pass2(measured))
+    partial = job.out / f"{cid}.partial.mp4"  # only a finished encode may become {cid}.mp4
     cmd = [ffmpeg_bin(), "-hide_banner", "-y", *inputs, "-filter_complex", graph,
-           "-map", "[vout]", "-map", "[aout]", *encode_args(cfg), "-t", f"{duration:.3f}", str(out)]
-    _run(cmd, job.render_dir, job.logs_dir / f"{cid}_render.log")
+           "-map", "[vout]", "-map", "[aout]", *encode_args(cfg), "-t", f"{duration:.3f}", str(partial)]
+    try:
+        _run(cmd, job.render_dir, job.logs_dir / f"{cid}_render.log")
+        os.replace(partial, out)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
     return out

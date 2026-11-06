@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import traceback
+from pathlib import Path
 
 from clipper import clips as clips_mod
 from clipper import doctor, fetch, package, reframe, render, transcribe
@@ -68,20 +69,40 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     return 0 if result["clips"] else 1
 
 
+def _read_fingerprint(path: Path) -> dict | None:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _write_fingerprint(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data))
+
+
 def _produce_one(job: Job, clip: dict, cfg: dict, info: dict, meta: dict, words: list[dict], force: set[str]) -> list[str]:
     cid = clip["id"]
     src = job.src_dir / f"{cid}.mp4"
-    if "video" in force or not src.exists():
+    src_print = job.src_dir / f"{cid}.json"
+    window = list(fetch.section_window(clip["start"], clip["end"], meta["duration"]))
+    if "video" in force or not src.exists() or _read_fingerprint(src_print) != {"window": window}:
+        src.unlink(missing_ok=True)  # yt-dlp skips a download whose file already exists
+        src_print.unlink(missing_ok=True)
         with timed(job, f"fetch_{cid}"):
             fetch.fetch_section(job, info["url"], clip, meta["duration"], info.get("cookies_browser"))
+        _write_fingerprint(src_print, {"window": window})
     crops = job.crops_dir / f"{cid}.json"
     if "reframe" in force or not is_fresh(crops, [src]):
         with timed(job, f"reframe_{cid}"):
             reframe.run(job, clip, words, meta["duration"])
     out = job.out / f"{cid}.mp4"
-    if "render" in force or not is_fresh(out, [crops, job.clips_resolved, job.overrides]):
+    out_print = job.render_dir / f"{cid}.json"
+    render_print = {"fast": bool(cfg["render"]["fast"]), "start": clip["start"], "end": clip["end"]}
+    if ("render" in force or not is_fresh(out, [crops, job.clips_resolved, job.overrides])
+            or _read_fingerprint(out_print) != render_print):
         with timed(job, f"render_{cid}"):
             render.render_clip(job, clip, cfg, words, meta["duration"])
+        _write_fingerprint(out_print, render_print)
     (job.out / f"{cid}_post.md").write_text(package.post_markdown(clip))
     return [str(p) for p in package.extract_frames(out, clip["duration"], job.frames_dir)]
 
@@ -96,6 +117,7 @@ def cmd_produce(args: argparse.Namespace) -> int:
     words, resolved = job.read_json(job.words), job.read_json(job.clips_resolved)
     results: dict[str, str | None] = job.read_json(job.results) if job.results.exists() else {}
     frames: dict[str, list[str]] = {}
+    attempted_ok = False
     force = set(args.force or [])
     for clip in resolved["clips"]:
         if args.only and clip["id"] not in args.only:
@@ -103,6 +125,7 @@ def cmd_produce(args: argparse.Namespace) -> int:
         try:
             frames[clip["id"]] = _produce_one(job, clip, cfg, info, meta, words, force)
             results[clip["id"]] = None
+            attempted_ok = True
         except Exception as exc:  # one broken clip must never stop the rest
             (job.logs_dir / f"{clip['id']}_error.log").write_text(traceback.format_exc())
             first_line = str(exc).splitlines()[0] if str(exc) else ""
@@ -111,7 +134,7 @@ def cmd_produce(args: argparse.Namespace) -> int:
     timings = job.read_json(job.timings) if job.timings.exists() else {}
     (job.out / "summary.md").write_text(package.summary_markdown(meta, resolved, results, timings))
     print(json.dumps({"output": str(job.out), "results": results, "qa_frames": frames}, indent=2))
-    return 0 if any(v is None for v in results.values()) else 1
+    return 0 if attempted_ok else 1
 
 
 def cmd_finish(args: argparse.Namespace) -> int:
