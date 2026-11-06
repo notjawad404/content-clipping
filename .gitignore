@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Clipper working files and outputs (large media)
+jobs/
+output/
+models/
+
+# macOS
+.DS_Store
