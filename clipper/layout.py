@@ -213,15 +213,15 @@ def plan_shot(t0: float, t1: float, tracks: list[Track], src_w: int, src_h: int,
 
 
 def merge_short_shots(shots: list[tuple[float, float]], min_len: float = MIN_SHOT) -> list[tuple[float, float]]:
+    """Merge short INTERIOR shots into the previous shot. A short first or last shot is a different camera
+    angle at the clip edge: it stays its own shot so it is planned (and cropped) from its own footage."""
     out: list[tuple[float, float]] = []
-    for s, e in shots:
-        if out and e - s < min_len:
+    last = len(shots) - 1
+    for i, (s, e) in enumerate(shots):
+        if 0 < i < last and e - s < min_len:
             out[-1] = (out[-1][0], e)
         else:
             out.append((s, e))
-    if len(out) > 1 and out[0][1] - out[0][0] < min_len:
-        out[1] = (out[0][0], out[1][1])
-        out.pop(0)
     return out
 
 

@@ -15,6 +15,9 @@ _ID_IN_URL = re.compile(r"(?:[?&]v=|/shorts/|/live/|/embed/|youtu\.be/)([A-Za-z0
 _BARE_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 VIDEO_FORMAT = "bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]"
 
+# yt-dlp re-encodes each section at cuts; its default (CRF 23) smears detail that render later upscales ~1.8x.
+SECTION_ENCODE = "ffmpeg_o:-c:v libx264 -preset veryfast -crf 16"
+
 
 class FetchError(Exception):
     pass
@@ -64,6 +67,7 @@ def section_cmd(url: str, start: float, end: float, out_path: Path, cookies_brow
         "-f", VIDEO_FORMAT,
         "--download-sections", f"*{start:.3f}-{end:.3f}",
         "--force-keyframes-at-cuts",
+        "--downloader-args", SECTION_ENCODE,
         "--merge-output-format", "mp4",
         "-o", str(out_path),
         url,

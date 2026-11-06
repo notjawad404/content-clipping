@@ -88,9 +88,28 @@ def test_plan_shot_back_and_forth_uses_split():
     assert len(segs) == 1 and segs[0]["layout"] == "split" and len(segs[0]["boxes"]) == 2
 
 
-def test_merge_short_shots():
+def test_merge_short_shots_merges_only_interior_shots():
     shots = [(0.0, 0.5), (0.5, 4.0), (4.0, 4.6), (4.6, 9.0)]
-    assert merge_short_shots(shots) == [(0.0, 4.6), (4.6, 9.0)]
+    assert merge_short_shots(shots) == [(0.0, 0.5), (0.5, 4.6), (4.6, 9.0)]
+
+
+def test_merge_short_shots_keeps_a_short_trailing_shot():
+    shots = [(0.0, 4.0), (4.0, 8.0), (8.0, 8.3)]
+    assert merge_short_shots(shots) == shots
+
+
+def test_merge_short_shots_single_shot_unchanged():
+    assert merge_short_shots([(0.0, 0.5)]) == [(0.0, 0.5)]
+
+
+def test_plan_clip_plans_a_short_leading_shot_on_its_own_face():
+    lead_face = (1400.0, 300.0, 200.0, 200.0)
+    samples = [(k / 5, [Face(k / 5, lead_face if k < 2 else LEFT, 0.1)]) for k in range(30)]
+    segs = plan_clip([(0.0, 0.4), (0.4, 6.0)], samples, SRC_W, SRC_H, [])
+    assert [s["layout"] for s in segs] == ["fill", "fill"]
+    assert (segs[0]["start"], segs[0]["end"]) == (0.0, 0.4)
+    assert segs[0]["boxes"] == [fill_box(1500.0, SRC_W, SRC_H)]
+    assert segs[1]["boxes"] == [fill_box(500.0, SRC_W, SRC_H)]
 
 
 def test_plan_clip_plans_each_shot():

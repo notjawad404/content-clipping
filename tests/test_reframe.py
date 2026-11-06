@@ -9,9 +9,9 @@ from clipper.jobs import job_for
 from clipper.reframe import mouth_ratio, to_clip_shots
 
 
-def test_to_clip_shots_shifts_clamps_and_merges():
+def test_to_clip_shots_shifts_clamps_and_merges_interior_only():
     shots = [(0.0, 1.5), (1.5, 2.2), (2.2, 20.0), (20.0, 40.0)]
-    assert to_clip_shots(shots, offset=2.0, duration=30.0) == [(0.0, 18.0), (18.0, 30.0)]
+    assert to_clip_shots(shots, offset=2.0, duration=30.0) == [(0.0, 0.2), (0.2, 18.0), (18.0, 30.0)]
 
 
 def test_to_clip_shots_without_cuts_is_one_shot():

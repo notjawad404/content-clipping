@@ -1,6 +1,6 @@
 import pytest
 
-from clipper.fetch import (FetchError, audio_cmd, extract_video_id, parse_meta, section_cmd,
+from clipper.fetch import (SECTION_ENCODE, FetchError, audio_cmd, extract_video_id, parse_meta, section_cmd,
                            section_window)
 
 
@@ -41,6 +41,8 @@ def test_section_cmd_formats_range(tmp_path):
     assert cmd[cmd.index("--download-sections") + 1] == "*10.000-55.500"
     assert "--force-keyframes-at-cuts" in cmd
     assert cmd[cmd.index("--merge-output-format") + 1] == "mp4"
+    assert cmd[cmd.index("--downloader-args") + 1] == SECTION_ENCODE
+    assert cmd.index("--downloader-args") < cmd.index("u")
 
 
 def test_section_window_pads_and_clamps():

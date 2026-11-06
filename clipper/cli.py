@@ -92,12 +92,13 @@ def _produce_one(job: Job, clip: dict, cfg: dict, info: dict, meta: dict, words:
     src = job.src_dir / f"{cid}.mp4"
     src_print = job.src_dir / f"{cid}.json"
     window = list(fetch.section_window(clip["start"], clip["end"], meta["duration"]))
-    if "video" in force or not src.exists() or _read_fingerprint(src_print) != {"window": window}:
+    src_fp = {"window": window, "encode": fetch.SECTION_ENCODE}
+    if "video" in force or not src.exists() or _read_fingerprint(src_print) != src_fp:
         src.unlink(missing_ok=True)  # yt-dlp skips a download whose file already exists
         src_print.unlink(missing_ok=True)
         with timed(job, f"fetch_{cid}"):
             fetch.fetch_section(job, info["url"], clip, meta["duration"], info.get("cookies_browser"))
-        _write_fingerprint(src_print, {"window": window})
+        _write_fingerprint(src_print, src_fp)
     crops = job.crops_dir / f"{cid}.json"
     if "reframe" in force or not is_fresh(crops, [src]):
         with timed(job, f"reframe_{cid}"):

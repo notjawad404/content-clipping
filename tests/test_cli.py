@@ -104,7 +104,18 @@ def test_changed_clip_times_refetch_the_section(tmp_path, monkeypatch):
     assert cli.main(["produce", "vid"]) == 0
     assert st.fetches == ["clip_01", "clip_01"]
     assert st.renders == ["clip_01", "clip_01"]
-    assert st.job.read_json(st.job.src_dir / "clip_01.json") == {"window": [38.0, 72.0]}
+    assert st.job.read_json(st.job.src_dir / "clip_01.json") == {"window": [38.0, 72.0], "encode": cli.fetch.SECTION_ENCODE}
+
+
+def test_section_fetched_with_old_encode_settings_is_refetched(tmp_path, monkeypatch):
+    st = Stages(tmp_path, monkeypatch)
+    assert cli.main(["produce", "vid"]) == 0
+    fp = st.job.src_dir / "clip_01.json"
+    window = list(cli.fetch.section_window(0.0, 30.0, 100.0))
+    st.job.write_json(fp, {"window": window})  # old fingerprint: window only, same clip times
+    assert cli.main(["produce", "vid"]) == 0
+    assert st.fetches == ["clip_01", "clip_01"]
+    assert st.job.read_json(fp) == {"window": window, "encode": cli.fetch.SECTION_ENCODE}
 
 
 def test_fast_and_normal_renders_are_not_interchangeable(tmp_path, monkeypatch):
