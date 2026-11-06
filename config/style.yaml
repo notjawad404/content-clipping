@@ -1,0 +1,49 @@
+# Default look and behaviour. Campaign files and run overrides are merged on top.
+max_clips: 8
+min_score: 7.0
+max_overlap: 0.5
+review_first: false
+
+length: {min: 20, target_min: 30, target_max: 60, max: 90}
+
+# Campaign fields (set per campaign in config/campaigns/<name>.yaml)
+creator_tag: ""
+required_text: ""
+required_tags: []
+banned_topics: []
+max_hashtags: 5
+
+captions:
+  font: "Montserrat Black"
+  size: 76
+  uppercase: true
+  max_words: 3
+  max_chars: 15
+  color: "#FFFFFF"
+  highlight_color: "#FFE500"
+  outline: 8
+  shadow: 3
+  x: 520          # centre x; keeps 15-char lines inside x 65..960
+  y: 1130         # centre y in fill/fit layouts (safe zone 270..1250)
+  split_y: 960    # centre y on the seam of the split layout
+
+hook_text:
+  enabled: true
+  duration: 2.5
+  size: 64
+  margin_top: 300
+
+zoom:
+  enabled: true
+  scale: 1.18
+  min_gap: 4.0
+  max_gap: 7.0
+
+sfx:
+  enabled: true
+  gain_db: -18
+
+render:
+  fast: false
+  crf: 18
+  fps: 30

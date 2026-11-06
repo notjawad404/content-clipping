@@ -1,0 +1,7 @@
+# Copy per campaign: config/campaigns/<name>.yaml, then run `clipper prepare <url> --campaign <name>`.
+creator_tag: "@creatorhandle"
+required_text: "Clip from @creatorhandle's podcast"
+required_tags: ["#creatorpodcast"]
+banned_topics: []
+length: {min: 15, max: 60}
+captions: {highlight_color: "#00E5FF"}
