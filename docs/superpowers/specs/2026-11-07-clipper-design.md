@@ -27,7 +27,7 @@ Auto-posting (Publisher), automatic video discovery (Researcher), before/after a
 | Free disk | ~17 GB (92% full) | Audio-first download, section-only video fetch, auto-cleanup, 5 GB preflight guard |
 | System Python | 3.9.6 | Too old for yt-dlp/mlx; use uv-managed Python 3.12 |
 | Homebrew ffmpeg | plain formula lacks libass | Use `ffmpeg-full` (keg-only: `/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg`) |
-| yt-dlp | needs JS runtime + EJS solver | `brew install deno`; install `yt-dlp[default]`; Node 22 as fallback runtime |
+| yt-dlp | needs JS runtime + EJS solver | Use the installed Node 22 via `--js-runtimes node`; install `yt-dlp[default]` (bundles the EJS solver). Deno not needed |
 | Project path | contains a space ("Content Clipping") | All tool invocations pass paths as list args (no shell string building); job dirs use space-free names |
 
 ## 3. Architecture
@@ -61,7 +61,7 @@ Content Clipping/
 
 | # | Stage | Actor | Input → Output |
 |---|---|---|---|
-| 0 | doctor | code | — → pass/fail report (ffmpeg-full has libass, deno, yt-dlp, models, ≥ 5 GB free) |
+| 0 | doctor | code | — → pass/fail report (ffmpeg-full has libass, node ≥ 20, yt-dlp + EJS, models, ≥ 5 GB free) |
 | 1 | fetch-audio | code | URL → `audio.m4a`, `meta.json` (title, channel, duration, chapters, video_id) |
 | 2 | transcribe | code | audio → `words.json`, `sentences.txt` |
 | 3 | select | **Claude** | `sentences.txt` + `meta.json` + campaign → `clips.json` |
@@ -80,7 +80,7 @@ Each stage is skipped if its output exists and is newer than its inputs (resume 
 ### 4.1 Fetch
 - Audio: `yt-dlp -f bestaudio -x` → m4a (~100 MB for 2 h). Metadata via `--dump-json`.
 - Video sections: `yt-dlp -f "bv*[height<=1080]+ba/b" --download-sections "*start-end" --force-keyframes-at-cuts` per clip, with 2 s padding each side (trimmed precisely at render).
-- On bot-check failure: retry with `--js-runtimes node`; if still blocked, Claude asks the user before using `--cookies-from-browser` (Google account risk per yt-dlp docs).
+- On bot-check failure: Claude asks the user before retrying with `--cookies-from-browser` (Google account risk per yt-dlp docs).
 
 ### 4.2 Transcribe
 - `parakeet-mlx` with `mlx-community/parakeet-tdt-0.6b-v2` (English-only; word timestamps built in; default 120 s chunking keeps memory ~1.7 GB extra).
@@ -191,7 +191,7 @@ Merge order: `style.yaml` ← campaign file ← run overrides (from natural-lang
 |---|---|
 | doctor fails | Stop with exact fix commands |
 | < 5 GB free | Stop before download |
-| yt-dlp bot check | Retry with node runtime → ask user about cookies |
+| yt-dlp bot check | Stop and ask user about `--cookies-from-browser` |
 | Transcription error | Stop; job resumable |
 | Clip fails validation | Skip with reason; others continue |
 | No face in a segment | `fit` layout fallback |
@@ -209,7 +209,7 @@ Merge order: `style.yaml` ← campaign file ← run overrides (from natural-lang
 | Need | Choice |
 |---|---|
 | Python | 3.12 via uv |
-| Download | `yt-dlp[default]` + Deno (Homebrew) |
+| Download | `yt-dlp[default]` + Node 22 (already installed) |
 | ASR | `parakeet-mlx` (parakeet-tdt-0.6b-v2) |
 | Shots | `scenedetect[opencv]` |
 | Faces | `mediapipe` (Tasks API) + face_landmarker.task model |
