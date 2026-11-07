@@ -1,0 +1,7 @@
+# Instagram posting settings. None of these are secrets (the token is the IG_ACCESS_TOKEN Actions secret).
+clips_repo: hammadalive7/content-clips      # public repo whose Release assets Instagram fetches
+ig_account_id: "17841438716134897"          # vanguardvisionhub
+graph_version: v26.0
+max_attempts: 3
+poll_interval_s: 10
+poll_timeout_s: 300
