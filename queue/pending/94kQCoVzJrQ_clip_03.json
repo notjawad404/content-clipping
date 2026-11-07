@@ -3,12 +3,20 @@
   "video_id": "94kQCoVzJrQ",
   "campaign": "health",
   "caption": "She spent years working on her mental health but ignored her body. Then she took her gut seriously. \ud83e\udd57\n#guthealth #mentalhealth #wellness",
+  "title": "Gut health, depression and chronic fatigue",
+  "youtube_description": "The Gut-Mind Connection: Lili Reinhart on Chronic Fatigue",
   "asset_url": "https://github.com/hammadalive7/content-clips/releases/download/v-94kQCoVzJrQ/clip_03.mp4",
-  "asset_id": 721646847,
-  "queued_at": "2026-11-07T19:04:28Z",
+  "asset_id": 721903187,
+  "queued_at": "2026-11-07T20:52:34Z",
   "attempts": 0,
   "last_error": null,
-  "container_id": "18129096497290538",
-  "media_id": "18400227118205495",
-  "permalink": "https://www.instagram.com/reel/Dfc5TkyCEb_/"
+  "container_id": null,
+  "media_id": null,
+  "permalink": null,
+  "youtube": {
+    "video_id": null,
+    "url": null,
+    "attempts": 0,
+    "last_error": null
+  }
 }

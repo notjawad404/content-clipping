@@ -3,12 +3,20 @@
   "video_id": "94kQCoVzJrQ",
   "campaign": "health",
   "caption": "Crying is the most healthy expression of how you're feeling. \ud83d\udc9b You don't need a reason to feel what you feel.\n#mentalhealth #anxiety #healing",
+  "title": "Crying is the healthiest expression of how you feel",
+  "youtube_description": "Crying Is the Healthiest Thing You Can Do | Lili Reinhart on Anxiety",
   "asset_url": "https://github.com/hammadalive7/content-clips/releases/download/v-94kQCoVzJrQ/clip_01.mp4",
-  "asset_id": 721622093,
-  "queued_at": "2026-11-07T18:55:26Z",
+  "asset_id": 721902495,
+  "queued_at": "2026-11-07T20:52:34Z",
   "attempts": 0,
   "last_error": null,
-  "container_id": "18129095459290538",
-  "media_id": "18117158471585282",
-  "permalink": "https://www.instagram.com/reel/Dfc4XwvgQry/"
+  "container_id": null,
+  "media_id": null,
+  "permalink": null,
+  "youtube": {
+    "video_id": null,
+    "url": null,
+    "attempts": 0,
+    "last_error": null
+  }
 }
