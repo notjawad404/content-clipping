@@ -342,3 +342,23 @@ def test_post_next_command_delegates_to_the_module(monkeypatch):
     monkeypatch.setattr(cli.post_next_mod, "main", lambda argv: seen.append(argv) or 0)
     assert cli.main(["post-next", "--dry-run"]) == 0 and cli.main(["post-next"]) == 0
     assert seen == [["--dry-run"], []]
+
+
+def test_parser_post_now():
+    assert build_parser().parse_args(["post-now"]).command == "post-now"
+
+
+def test_post_now_command_delegates_and_returns_its_exit_code(monkeypatch):
+    codes = iter([0, 1])
+    monkeypatch.setattr(cli.post_now_mod, "main", lambda: next(codes))
+    assert cli.main(["post-now"]) == 0
+    assert cli.main(["post-now"]) == 1
+
+
+def test_post_now_publish_errors_are_one_line_exit_2(monkeypatch, capsys):
+    def boom():
+        raise cli.PublishError("config is broken")
+
+    monkeypatch.setattr(cli.post_now_mod, "main", boom)
+    assert cli.main(["post-now"]) == 2
+    assert "error: config is broken" in capsys.readouterr().out

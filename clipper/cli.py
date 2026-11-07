@@ -17,6 +17,7 @@ from clipper.fetch import FetchError
 from clipper.jobs import Job, is_fresh, job_for, timed
 from clipper.publish import PublishError
 from clipper.publish import post_next as post_next_mod
+from clipper.publish import post_now as post_now_mod
 from clipper.publish.config import load_publish_config
 from clipper.publish.enqueue import enqueue_job
 from clipper.publish.gitops import commit_queue
@@ -188,6 +189,10 @@ def cmd_post_next(args: argparse.Namespace) -> int:
     return post_next_mod.main(["--dry-run"] if args.dry_run else [])
 
 
+def cmd_post_now(args: argparse.Namespace) -> int:
+    return post_now_mod.main()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="clipper", description="Local podcast clipper")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -211,11 +216,13 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--only", nargs="+")
     n = sub.add_parser("post-next", help="post the oldest queued clip to Instagram (normally run by GitHub Actions)")
     n.add_argument("--dry-run", action="store_true")
+    sub.add_parser("post-now", help="post every queued clip now by running the live workflow once per clip")
     return parser
 
 
 HANDLERS = {"doctor": cmd_doctor, "prepare": cmd_prepare, "resolve": cmd_resolve,
-            "produce": cmd_produce, "finish": cmd_finish, "queue": cmd_queue, "post-next": cmd_post_next}
+            "produce": cmd_produce, "finish": cmd_finish, "queue": cmd_queue, "post-next": cmd_post_next,
+            "post-now": cmd_post_now}
 
 
 def main(argv: list[str] | None = None) -> int:
