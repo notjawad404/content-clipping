@@ -109,16 +109,17 @@ Cron times are not configurable at runtime (Actions requires literal cron in the
 1. Take the oldest entry in `queue/pending/`. If none, exit 0 ("nothing to post").
 2. If the entry has a `media_id`, a previous run published it but did not finish cleanup: skip to step 8.
 3. `GET /<ig-account-id>/content_publishing_limit`. If used ≥ total, exit 0 with a notice. This is not a failure and does not count as an attempt.
+3.5. If the entry has a `container_id` from an earlier attempt (a retry), list the account's 5 most recent media (`GET /<ig-account-id>/media?limit=5&fields=caption,timestamp`). If one has an identical caption and was created within the last 24 hours, record it as the published media (`media_id`, `permalink`), commit, and skip to step 8: the earlier run published but could not commit. A dry run skips this check.
 4. If the entry has a `container_id` from an earlier attempt, reuse it only if its status is not `ERROR`/`EXPIRED`; otherwise create a new one.
 5. `POST /<ig-account-id>/media` with `media_type=REELS`, `video_url=<asset_url>`, `caption=<caption>`, `share_to_feed=true`. Save `container_id` to the entry and commit it before continuing.
 6. Poll `GET /<container_id>?fields=status_code` every `poll_interval_s` until `FINISHED`. `ERROR`/`EXPIRED` or `poll_timeout_s` exceeded → failure.
-7. `POST /<ig-account-id>/media_publish?creation_id=<container_id>`. Save `media_id` to the entry immediately and commit. Fetch `permalink`.
+7. On a retry, repeat the step 3.5 check once more (a post may have appeared while the container processed) and record a match instead of publishing. Otherwise `POST /<ig-account-id>/media_publish?creation_id=<container_id>`. Save `media_id` to the entry immediately and commit. Fetch `permalink`.
 8. Move the entry to `queue/posted/`, delete the release asset, commit.
 
 Failure handling:
 - A failure at steps 5–7 increments `attempts`, records `last_error`, leaves the entry in `pending`, and exits non-zero so GitHub emails a failure notice. At `max_attempts` the entry moves to `queue/failed/`.
 - `TokenInvalid` exits non-zero without incrementing `attempts` (the clip is fine; the credential is not).
-- The double-post guard is step 2: `media_id` is committed immediately after publish, before any other work. If that commit itself fails, the next run sees no `media_id` and could post the clip again. To narrow that window, step 7 first lists the account's 5 most recent media (`GET /<ig-account-id>/media?limit=5&fields=caption,timestamp`) and, if one has an identical caption and was created within the last 24 hours, records it as the published media instead of publishing. This reduces but cannot fully remove the double-post risk; it is a known limitation.
+- The double-post guard is step 2: `media_id` is committed immediately after publish, before any other work. If that commit itself fails, the next run sees no `media_id` and could post the clip again. To narrow that window, on a retry step 3.5 checks the account's recent media before any container is reused or created (so a published container is never waited on), and step 7 checks once more before publishing; a match with an identical caption created within the last 24 hours is recorded as the published media instead of publishing. This reduces but cannot fully remove the double-post risk; it is a known limitation.
 
 Secrets are never printed; captions are not logged beyond the first 40 characters.
 

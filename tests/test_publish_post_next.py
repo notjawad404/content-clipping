@@ -161,7 +161,7 @@ def test_existing_usable_container_is_reused(tmp_path):
     setup(tmp_path, container_id="c-old")
     client = FakeClient(status="IN_PROGRESS")
     run(tmp_path, client)
-    assert "create" not in client.calls and client.calls[:3] == ["limit", "status", "wait"]
+    assert "create" not in client.calls and client.calls[:4] == ["limit", "recent", "status", "wait"]
 
 
 def test_retry_finds_a_recent_identical_post_and_does_not_publish_again(tmp_path):
@@ -276,3 +276,37 @@ def test_main_reports_a_config_error_without_leaking_the_token(monkeypatch, caps
     assert post_next_module.main([]) == 2
     out = capsys.readouterr().out
     assert "missing posting config" in out and "super-secret-token" not in out
+
+
+def test_retry_recovers_a_published_duplicate_before_creating_a_container(tmp_path):
+    setup(tmp_path, container_id="c-old")
+    recent = [{"id": "m-9", "caption": CAPTION, "timestamp": "2026-11-07T11:00:00+0000",
+               "permalink": "https://instagram.com/reel/dup/"}]
+    client = FakeClient(status="PUBLISHED", recent=recent)
+    client.errors["wait"] = ProcessingFailed("container PUBLISHED")
+    code, deleted, commits = run(tmp_path, client)
+    assert code == 0 and deleted == [7]
+    assert "recent" in client.calls
+    assert not {"create", "wait", "publish"} & set(client.calls)
+    assert queue.load_all(tmp_path, "pending") == []
+    posted = queue.load_all(tmp_path, "posted")[0]
+    assert posted["media_id"] == "m-9" and posted["permalink"] == "https://instagram.com/reel/dup/"
+    assert posted["attempts"] == 0 and posted["container_id"] == "c-old"
+
+
+def test_retry_with_an_old_published_container_and_an_old_duplicate_publishes_a_new_clip(tmp_path):
+    setup(tmp_path, container_id="c-old")
+    recent = [{"id": "m-9", "caption": CAPTION, "timestamp": "2026-11-05T11:00:00+0000"}]
+    client = FakeClient(status="PUBLISHED", recent=recent)
+    assert run(tmp_path, client)[0] == 0
+    assert {"create", "wait", "publish"} <= set(client.calls)
+    assert queue.load_all(tmp_path, "posted")[0]["media_id"] == "m-1"
+
+
+def test_dry_run_on_a_retry_does_not_record_a_duplicate(tmp_path):
+    setup(tmp_path, container_id="c-old")
+    recent = [{"id": "m-9", "caption": CAPTION, "timestamp": "2026-11-07T11:00:00+0000"}]
+    client = FakeClient(status="FINISHED", recent=recent)
+    code, deleted, commits = run(tmp_path, client, dry_run=True)
+    assert code == 0 and "recent" not in client.calls
+    assert queue.load_all(tmp_path, "posted") == [] and deleted == [] and commits == []

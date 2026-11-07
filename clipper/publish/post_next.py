@@ -41,10 +41,25 @@ def _recent_duplicate(client, caption: str, now: datetime) -> dict | None:
     return None
 
 
+def _record_duplicate(root: Path, entry: dict, duplicate: dict, commit: Callable[[str], object],
+                      log: Callable[[str], None]) -> None:
+    log("found an identical recent post; recording it instead of publishing again")
+    entry["media_id"] = str(duplicate["id"])
+    entry["permalink"] = duplicate.get("permalink")
+    queue.save(root, "pending", entry)
+    commit(f"queue: published {entry['id']}")
+
+
 def _publish(root: Path, client, cfg: dict, entry: dict, dry_run: bool, commit: Callable[[str], object],
              now: datetime, log: Callable[[str], None]) -> bool:
     """Create/reuse the container and publish. Returns False for a dry run (nothing published)."""
     is_retry = bool(entry.get("container_id"))
+    if is_retry and not dry_run:
+        # A previous run may have published and then failed to commit: look before touching any container.
+        duplicate = _recent_duplicate(client, entry["caption"], now)
+        if duplicate:
+            _record_duplicate(root, entry, duplicate, commit, log)
+            return True
     container = entry.get("container_id")
     if container and not _container_usable(client, container):
         container = None
@@ -58,17 +73,16 @@ def _publish(root: Path, client, cfg: dict, entry: dict, dry_run: bool, commit: 
     if dry_run:
         log("dry run: container FINISHED; not publishing")
         return False
+    # Second chance: a post may have appeared while the container was processing.
     duplicate = _recent_duplicate(client, entry["caption"], now) if is_retry else None
     if duplicate:
-        log("found an identical recent post; recording it instead of publishing again")
-        entry["media_id"] = str(duplicate["id"])
-        entry["permalink"] = duplicate.get("permalink")
-    else:
-        entry["media_id"] = client.publish(container)
-        try:
-            entry["permalink"] = client.permalink(entry["media_id"])
-        except IgError:
-            entry["permalink"] = None
+        _record_duplicate(root, entry, duplicate, commit, log)
+        return True
+    entry["media_id"] = client.publish(container)
+    try:
+        entry["permalink"] = client.permalink(entry["media_id"])
+    except IgError:
+        entry["permalink"] = None
     queue.save(root, "pending", entry)
     commit(f"queue: published {entry['id']}")
     return True
