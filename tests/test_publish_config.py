@@ -12,7 +12,17 @@ def write(tmp_path, text):
 def test_defaults_are_applied(tmp_path):
     cfg = load_publish_config(write(tmp_path, 'clips_repo: me/clips\nig_account_id: "123"\n'))
     assert cfg == {"clips_repo": "me/clips", "ig_account_id": "123", "graph_version": "v26.0",
-                   "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300}
+                   "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300,
+                   "youtube": False, "youtube_privacy": "private"}
+
+
+def test_youtube_settings_are_validated(tmp_path):
+    base = 'clips_repo: me/clips\nig_account_id: "1"\n'
+    assert load_publish_config(write(tmp_path, base + "youtube: true\nyoutube_privacy: public\n"))["youtube"] is True
+    with pytest.raises(PublishConfigError, match="youtube_privacy"):
+        load_publish_config(write(tmp_path, base + "youtube_privacy: secret\n"))
+    with pytest.raises(PublishConfigError, match="youtube must be"):
+        load_publish_config(write(tmp_path, base + "youtube: yes please\n"))
 
 
 def test_account_id_written_as_a_number_becomes_a_string(tmp_path):

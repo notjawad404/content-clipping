@@ -10,7 +10,9 @@ from clipper.publish import PublishError
 
 DEFAULT_PATH = CONFIG_DIR / "publish.yaml"
 REQUIRED = ("clips_repo", "ig_account_id")
-DEFAULTS = {"graph_version": "v26.0", "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300}
+DEFAULTS = {"graph_version": "v26.0", "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300,
+            "youtube": False, "youtube_privacy": "private"}
+YOUTUBE_PRIVACY = ("private", "unlisted", "public")
 POSITIVE_INT_KEYS = ("max_attempts", "poll_interval_s", "poll_timeout_s")
 NON_EMPTY_STR_KEYS = ("clips_repo", "graph_version", "queue_branch")
 
@@ -48,6 +50,10 @@ def load_publish_config(path: Path = DEFAULT_PATH) -> dict:
     for key in NON_EMPTY_STR_KEYS:
         if not _is_non_empty_str(cfg[key]):
             raise PublishConfigError(f"{path.name}: {key} must be a non-empty string")
+    if not isinstance(cfg["youtube"], bool):
+        raise PublishConfigError(f"{path.name}: youtube must be true or false")
+    if cfg["youtube_privacy"] not in YOUTUBE_PRIVACY:
+        raise PublishConfigError(f"{path.name}: youtube_privacy must be one of {', '.join(YOUTUBE_PRIVACY)}")
     account = cfg["ig_account_id"]
     if _is_int(account):
         cfg["ig_account_id"] = str(account)

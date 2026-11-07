@@ -40,7 +40,8 @@ def enqueue_job(job: Job, root: Path, repo: str, *, upload=clips_repo.upload_ass
                 rows.append((cid, title, f"failed: {exc}"))
                 continue
             entry = queue.new_entry(video_id=job.video_id, clip_id=cid, campaign=campaign, caption=caption,
-                                    asset_url=url, asset_id=asset_id, queued_at=stamp)
+                                    asset_url=url, asset_id=asset_id, queued_at=stamp, title=title,
+                                    youtube_description=clip["post"].get("youtube") or caption)
             try:
                 queue.save(root, "pending", entry)
             except OSError as exc:
