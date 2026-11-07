@@ -7,7 +7,7 @@ description: Use when the user gives a YouTube podcast or video link and wants s
 
 Turns one YouTube link into finished 1080×1920 clips plus ready-to-paste post captions, and by default posts them to Instagram. Code downloads, transcribes, reframes, renders and posts. **You** choose the moments, score them, write the hook text and post copy, and check the result visually.
 
-**Default when the user only pastes a link:** make up to 5 clips, then post every clip that passes to Instagram right away (section 7), with no further questions. Only stop for the cases named below: a YouTube bot check, `review first`, or a failed step.
+**Default when the user only pastes a link:** make up to 5 clips, then post every clip that passes to Instagram right away (section 7), with no further questions, unless older clips are already waiting in the queue (then section 7 defers posting to the cron). Only stop for the cases named below: a YouTube bot check, `review first`, a named campaign that does not exist, or a failed step.
 
 Run every command from the repo root with `uv run`. Commands are resumable: rerunning skips finished work.
 
@@ -23,8 +23,8 @@ Then check, before any download, that posting will work, so a problem shows up i
 
 - **URL** (required). One link per run.
 - **Count:** if the user names one ("only 3", "10 clips", "just the best clip"), use it (`max_clips: N` in overrides.yaml). Otherwise 5.
-- **Mode:** if the user says "schedule them", "spread them out" or "through the day", only queue the clips; the cron posts one clip per run at 09:00, 13:00 and 19:00 UTC (3 a day). Anything else means post now.
-- **Campaign:** if the user names one, it must exist as `config/campaigns/<name>.yaml`. If it doesn't, ask for the brief's rules (creator tag, required caption text, required hashtags, length limits, banned topics) and create the file by copying `config/campaigns/example.yaml`. If the user names none, choose from the video after `prepare` has written `meta.json`: read every `config/campaigns/*.yaml` except `example.yaml` and compare each file's creator tag, required text, name and comments with the video's channel, title and description. Pick a campaign only on a clear match (the creator or show is named, or the campaign is plainly about the video's topic); otherwise use none. If one applies, run `uv run clipper prepare "<url>" --campaign <name>` again (everything is cached, so it takes seconds) before selecting clips. Remember which campaign you used, or that you used none, and why; you report it at the end.
+- **Mode:** if the user says "schedule them", "spread them out" or "through the day", only queue the clips; the cron posts one clip per run at 09:00, 13:00 and 19:00 UTC (3 a day). Anything else means post now, unless older clips are already waiting in the queue (see section 7).
+- **Campaign:** if the user names one, it must exist as `config/campaigns/<name>.yaml`. If it doesn't, ask for the brief's rules (creator tag, required caption text, required hashtags, length limits, banned topics) and create the file by copying `config/campaigns/example.yaml`. If the user names none, choose from the video after `prepare` has written `meta.json`: read every `config/campaigns/*.yaml` except `example.yaml` and compare each file's creator tag, required text, `brief:` (if present), name and comments with the video's channel, title and description. A campaign matches ONLY when the video's channel, creator or show is the one the campaign names or is about. A match on topic alone does not count. If exactly one campaign matches, use it; if none or more than one match, use none (and if more than one matched, say so in the final report, naming them). The user naming a campaign always wins. If one applies, run `uv run clipper prepare "<url>" --campaign <name>` again (everything is cached, so it takes seconds) before selecting clips. After `prepare`, report the campaign actually in force by reading the `campaign` field of `jobs/<video_id>/job.json` (a previous run of the same video keeps its campaign, so do not assume "none" if job.json says otherwise). Remember which campaign is in force, and why; you report it at the end.
 - **Tweaks** go into `jobs/<video_id>/overrides.yaml`. Write it after `prepare` creates the folder and before `resolve`:
 
 | User says | overrides.yaml |
@@ -38,6 +38,8 @@ Then check, before any download, that posting will work, so a problem shows up i
 | "fast render" | pass `--fast` to `produce` |
 
 ## 2. Prepare
+
+If a campaign applies, see the Campaign rule in section 1; apply it right after `prepare` and before selecting clips.
 
 `uv run clipper prepare "<url>" [--campaign <name>]`: run it with `run_in_background: true` (a 1-2 hour episode needs audio download plus transcription, and the first run also downloads the ~1.2 GB Parakeet model, so it can exceed the Bash timeout), then wait for it to finish.
 
@@ -119,15 +121,17 @@ To fix, edit `overrides.yaml` (e.g. `captions: {y: 1180}`). It is global for the
 
 Only clips that passed QA go forward.
 
-1. `uv run clipper queue <video_id> --only <passing clip ids>` uploads each clip and commits the queue entries. It only works on `master`.
-2. **Post now (default):** run `uv run clipper post-now` with `run_in_background: true` (each post takes about two minutes, so five clips take about ten) and wait for it to finish. It prints `posted <id>: <link>` for each clip and stops at the first failure. **Schedule mode:** stop after step 1 and tell the user the cron posts one clip at 09:00, 13:00 and 19:00 UTC.
-3. If `post-now` stops with an error, report it with the run link it printed. Do not retry in a loop. Clips already posted stay posted and the rest stay queued; running `uv run clipper post-now` again continues from the queue.
-4. If `post-now` also posted clips from older videos (their ids appear in its output), say so.
+0. If no clip passed QA (or none cleared the quality bar), STOP: do not run `queue` or `post-now`; report why.
+1. Run `git pull --rebase --autostash` (the workflow's bot keeps moving queue entries), then list `queue/pending/`. Entries are named `<video_id>_clip_NN.json`. "Older entries" = any file there whose name does not start with `<video_id>_` (entries of THIS video from an earlier partial run do not count as older). Note the count N.
+2. Run `uv run clipper queue <video_id> --only <passing clip ids>`; it uploads each clip and commits the queue entries, and only works on `master`. If it refuses (wrong branch) or exits non-zero, report exactly what it printed; if some clips were queued and others failed, say which. Do not run `post-now` after a partial failure unless every clip that passed QA is queued; otherwise the user gets a partial set posted silently, so say which are missing instead.
+3. **Mode.** Post now ONLY IF the user did not ask to schedule AND there were no older entries: run `uv run clipper post-now` with `run_in_background: true` (each post takes about two minutes, so five clips take about ten) and wait for it to finish. It prints `posted <id>: <link>` for each clip and stops at the first failure.
+   Otherwise (the user asked to schedule, OR older entries exist) stop after `queue`: tell the user the clips are queued behind N older entries and that the cron posts one clip per run at 09:00, 13:00 and 19:00 UTC (3 a day, oldest first), so the new clips go out after the older ones. Queued clips are publicly downloadable from the clips repo until they post. If the reason was older entries, say so explicitly: "posting is deferred to the cron because N older clips are already waiting; say 'post everything now' if you want them all posted immediately." If the user then says that, run `uv run clipper post-now`.
+4. If `post-now` stops with an error, report it with the run link it printed. Do not retry in a loop. Clips already posted stay posted and the rest stay queued; running `uv run clipper post-now` again continues from the queue.
 
 ## 8. Finish
 
 Run `uv run clipper finish <video_id>` (deletes downloaded audio and video, keeps transcripts). Then tell the user:
-- each posted Reel link, one per clip with its title and score; in schedule mode, which clips are queued and when the cron will post them;
+- each posted Reel link, one per clip with its title and score; if posting was deferred (schedule mode or older clips waiting), which clips are queued and when the cron will post them;
 - the campaign used (or "none") and why;
 - how many clips cleared the quality bar if that is fewer than requested, and any clip that was skipped or failed and why (see `summary.md`);
 - the folder `output/<video_id>/`, where each `clip_XX_post.md` holds the ready-to-paste caption for every platform;
