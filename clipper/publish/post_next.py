@@ -157,6 +157,25 @@ def _record_failure(root: Path, entry: dict, exc: Exception, cfg: dict, commit: 
     return 1
 
 
+def _is_stale_duplicate(root: Path, entry: dict) -> bool:
+    return any(queue.path_for(root, state, entry["id"]).exists() for state in ("posted", "failed"))
+
+
+def _remove_stale_duplicate(root: Path, entry: dict, commit: Callable[[str], object],
+                            log: Callable[[str], None], dry_run: bool) -> int:
+    """A pending file for an id already in posted/ or failed/ (e.g. a stale branch was merged): drop only it."""
+    log(f"stale duplicate of {entry['id']} already in posted/failed; removing the pending copy")
+    if dry_run:
+        return 0
+    try:
+        queue.path_for(root, "pending", entry["id"]).unlink(missing_ok=True)
+        commit(f"queue: remove stale duplicate {entry['id']}")
+    except (PublishError, OSError) as exc:
+        log(f"error: could not remove the stale duplicate: {exc}")
+        return 1
+    return 0
+
+
 def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], object], *, dry_run: bool = False,
               commit: Callable[[str], object] | None = None, now: datetime | None = None,
               log: Callable[[str], None] = print) -> int:
@@ -170,6 +189,8 @@ def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], objec
     if entry is None:
         log("nothing to post: the queue is empty")
         return 0
+    if _is_stale_duplicate(root, entry):
+        return _remove_stale_duplicate(root, entry, commit, log, dry_run)
     log(f"next: {entry['id']} ({_short(entry['caption'])})")
     try:
         if entry.get("media_id"):
@@ -219,7 +240,9 @@ def main(argv: list[str] | None = None) -> int:
         client = InstagramClient(token, cfg["ig_account_id"], cfg["graph_version"])
         return post_next(queue.QUEUE_ROOT, client, cfg,
                          lambda asset_id: clips_repo.delete_asset(cfg["clips_repo"], asset_id),
-                         dry_run=args.dry_run, commit=None if args.dry_run else gitops.commit_queue)
+                         dry_run=args.dry_run,
+                         commit=None if args.dry_run
+                         else (lambda message: gitops.commit_queue(message, branch=cfg["queue_branch"])))
     except PublishError as exc:
         print(f"error: {exc}")
         return 2

@@ -177,7 +177,7 @@ def cmd_queue(args: argparse.Namespace) -> int:
         print(f"{cid}  {status}  {title}")
     if any(status in ("queued", "skipped: already queued") for _, _, status in rows):
         # already-queued rows may be local-only from an earlier failed commit or push, so retry
-        if commit_queue(f"queue: add {args.video_id}"):
+        if commit_queue(f"queue: add {args.video_id}", branch=cfg["queue_branch"]):
             print("queued entries committed and pushed")
         else:
             print("nothing new to commit")

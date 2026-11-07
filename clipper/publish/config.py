@@ -10,9 +10,9 @@ from clipper.publish import PublishError
 
 DEFAULT_PATH = CONFIG_DIR / "publish.yaml"
 REQUIRED = ("clips_repo", "ig_account_id")
-DEFAULTS = {"graph_version": "v26.0", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300}
+DEFAULTS = {"graph_version": "v26.0", "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300}
 POSITIVE_INT_KEYS = ("max_attempts", "poll_interval_s", "poll_timeout_s")
-NON_EMPTY_STR_KEYS = ("clips_repo", "graph_version")
+NON_EMPTY_STR_KEYS = ("clips_repo", "graph_version", "queue_branch")
 
 
 class PublishConfigError(PublishError):

@@ -215,12 +215,36 @@ def test_parser_queue_and_post_next():
     assert build_parser().parse_args(["post-next", "--dry-run"]).dry_run
 
 
+PUBLISH_CFG = {"clips_repo": "o/clips", "queue_branch": "master"}
+
+
 def queue_cli(monkeypatch, rows, commit=lambda message: True):
     commits = []
-    monkeypatch.setattr(cli, "load_publish_config", lambda: {"clips_repo": "o/clips"})
-    monkeypatch.setattr(cli, "commit_queue", lambda message: commits.append(message) or commit(message))
+    monkeypatch.setattr(cli, "load_publish_config", lambda: PUBLISH_CFG)
+    monkeypatch.setattr(cli, "commit_queue", lambda message, branch=None: commits.append(message) or commit(message))
     monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: rows)
     return commits
+
+
+def test_queue_command_passes_the_configured_branch_to_commit_queue(monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli, "load_publish_config", lambda: {**PUBLISH_CFG, "queue_branch": "trunk"})
+    monkeypatch.setattr(cli, "commit_queue", lambda message, branch=None: seen.append((message, branch)) or True)
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "T", "queued")])
+    assert cli.main(["queue", "vid"]) == 0
+    assert seen == [("queue: add vid", "trunk")]
+
+
+def test_queue_command_reports_a_wrong_branch_refusal_as_one_line_error(monkeypatch, capsys):
+    def refuse(message, branch=None):
+        raise GitError(f"refusing to commit: you are on 'feature/x' but the queue lives on {branch!r}; "
+                       f"switch with `git checkout {branch}`")
+
+    monkeypatch.setattr(cli, "load_publish_config", lambda: PUBLISH_CFG)
+    monkeypatch.setattr(cli, "commit_queue", refuse)
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "T", "queued")])
+    assert cli.main(["queue", "vid"]) == 2
+    assert "git checkout master" in capsys.readouterr().out
 
 
 def test_queue_command_commits_when_something_was_queued(monkeypatch, capsys):
@@ -275,8 +299,8 @@ def test_queue_command_second_run_retries_after_a_failed_commit(monkeypatch, cap
 
 def test_queue_command_commits_the_queued_clips_but_exits_nonzero_when_any_failed(monkeypatch, capsys):
     commits = []
-    monkeypatch.setattr(cli, "load_publish_config", lambda: {"clips_repo": "o/clips"})
-    monkeypatch.setattr(cli, "commit_queue", lambda message: commits.append(message))
+    monkeypatch.setattr(cli, "load_publish_config", lambda: PUBLISH_CFG)
+    monkeypatch.setattr(cli, "commit_queue", lambda message, branch=None: commits.append(message))
     monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [
         ("clip_01", "A", "failed: upload asset failed: denied"), ("clip_02", "B", "queued")])
     assert cli.main(["queue", "vid"]) == 1
@@ -286,18 +310,18 @@ def test_queue_command_commits_the_queued_clips_but_exits_nonzero_when_any_faile
 
 def test_queue_command_does_not_commit_when_every_clip_failed(monkeypatch):
     commits = []
-    monkeypatch.setattr(cli, "load_publish_config", lambda: {"clips_repo": "o/clips"})
-    monkeypatch.setattr(cli, "commit_queue", lambda message: commits.append(message))
+    monkeypatch.setattr(cli, "load_publish_config", lambda: PUBLISH_CFG)
+    monkeypatch.setattr(cli, "commit_queue", lambda message, branch=None: commits.append(message))
     monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "A", "failed: x")])
     assert cli.main(["queue", "vid"]) == 1
     assert commits == []
 
 
 def test_queue_command_reports_a_commit_failure_as_one_line_error(monkeypatch, capsys):
-    def boom(message):
+    def boom(message, branch=None):
         raise GitError("git push failed: rejected")
 
-    monkeypatch.setattr(cli, "load_publish_config", lambda: {"clips_repo": "o/clips"})
+    monkeypatch.setattr(cli, "load_publish_config", lambda: PUBLISH_CFG)
     monkeypatch.setattr(cli, "commit_queue", boom)
     monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "T", "queued")])
     assert cli.main(["queue", "vid"]) == 2
@@ -306,7 +330,7 @@ def test_queue_command_reports_a_commit_failure_as_one_line_error(monkeypatch, c
 
 
 def test_queue_command_reports_a_missing_clips_resolved_as_error(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(cli, "load_publish_config", lambda: {"clips_repo": "o/clips"})
+    monkeypatch.setattr(cli, "load_publish_config", lambda: PUBLISH_CFG)
     monkeypatch.setattr(cli, "job_for", lambda video_id: job_for(video_id, jobs_dir=tmp_path / "jobs",
                                                                   output_dir=tmp_path / "out"))
     assert cli.main(["queue", "vid"]) == 2

@@ -8,7 +8,7 @@ from clipper.publish.gitops import GitError, commit_queue
 
 def make_run(staged=(), has_changes=True, push_codes=(0,), commit_code=0, probe_code=0,
              add_code=0, quiet_code=None, pull_codes=(0,), push_stderr=("rejected", "rejected"),
-             ahead="0", rev_list_code=0):
+             ahead="0", rev_list_code=0, current_branch="master", branch_code=0):
     calls = []
     pushes = list(zip(push_codes, push_stderr))
     pulls = list(pull_codes)
@@ -21,6 +21,8 @@ def make_run(staged=(), has_changes=True, push_codes=(0,), commit_code=0, probe_
         if verb == ["diff", "--cached"] and "--quiet" in args:
             code = quiet_code if quiet_code is not None else (1 if has_changes else 0)
             return SimpleNamespace(returncode=code, stdout="", stderr="diff broke")
+        if args[1] == "rev-parse":
+            return SimpleNamespace(returncode=branch_code, stdout=current_branch + "\n", stderr="not a repo")
         if args[1] == "rev-list":
             return SimpleNamespace(returncode=rev_list_code, stdout=ahead, stderr="no upstream")
         if args[1] == "add":
@@ -30,7 +32,7 @@ def make_run(staged=(), has_changes=True, push_codes=(0,), commit_code=0, probe_
         if args[1] == "push":
             code, err = pushes.pop(0) if pushes else (0, "")
             return SimpleNamespace(returncode=code, stdout="", stderr=err)
-        if verb == ["pull", "--rebase"]:
+        if verb == ["pull", "--rebase"] and "--autostash" in args:
             return SimpleNamespace(returncode=pulls.pop(0) if pulls else 0, stdout="", stderr="conflict")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -61,7 +63,7 @@ def test_refuses_when_unrelated_files_are_staged(tmp_path):
 def test_push_rejection_pulls_with_rebase_and_retries(tmp_path):
     run, calls = make_run(push_codes=(1, 0))
     assert commit_queue("queue: add vid", cwd=tmp_path, run=run) is True
-    assert ["pull", "--rebase"] in calls
+    assert ["pull", "--rebase", "--autostash"] in calls
 
 
 def test_push_that_keeps_failing_raises(tmp_path):
@@ -112,7 +114,7 @@ def test_second_push_failure_includes_push_stderr(tmp_path):
     run, calls = make_run(push_codes=(1, 1), push_stderr=("net down", "remote rejected"))
     with pytest.raises(GitError, match="git push failed: remote rejected"):
         commit_queue("queue: add vid", cwd=tmp_path, run=run)
-    assert calls.count(["pull", "--rebase"]) == 1
+    assert calls.count(["pull", "--rebase", "--autostash"]) == 1
 
 
 def test_unpushed_commit_with_nothing_new_to_commit_is_pushed(tmp_path):
@@ -145,7 +147,7 @@ def test_unpushed_check_with_garbage_output_raises(tmp_path):
 def test_retry_push_rejection_pulls_with_rebase_and_retries(tmp_path):
     run, calls = make_run(has_changes=False, ahead="2", push_codes=(1, 0))
     assert commit_queue("queue: retry", cwd=tmp_path, run=run) is True
-    assert ["pull", "--rebase"] in calls and calls.count(["push"]) == 2
+    assert ["pull", "--rebase", "--autostash"] in calls and calls.count(["push"]) == 2
 
 
 def test_retry_pull_failure_aborts_rebase_and_raises(tmp_path):
@@ -166,3 +168,38 @@ def test_unrelated_staged_files_still_refuse_before_the_unpushed_check(tmp_path)
     with pytest.raises(GitError, match="README.md"):
         commit_queue("queue: retry", cwd=tmp_path, run=run)
     assert not any(c[0] in ("rev-list", "push") for c in calls)
+
+
+def test_branch_guard_runs_first_and_passes_on_the_right_branch(tmp_path):
+    run, calls = make_run()
+    assert commit_queue("queue: add vid", cwd=tmp_path, run=run, branch="master") is True
+    assert calls[0] == ["rev-parse", "--abbrev-ref", "HEAD"]
+
+
+def test_wrong_branch_is_refused_before_anything_else(tmp_path):
+    run, calls = make_run(current_branch="feature/clipper-v1")
+    with pytest.raises(GitError) as caught:
+        commit_queue("queue: add vid", cwd=tmp_path, run=run, branch="master")
+    assert str(caught.value) == ("refusing to commit: you are on 'feature/clipper-v1' but the queue lives on "
+                                 "'master'; switch with `git checkout master`")
+    assert calls == [["rev-parse", "--abbrev-ref", "HEAD"]]
+
+
+def test_branch_lookup_failure_raises_and_changes_nothing(tmp_path):
+    run, calls = make_run(branch_code=128)
+    with pytest.raises(GitError, match="cannot determine the current branch: not a repo"):
+        commit_queue("queue: add vid", cwd=tmp_path, run=run, branch="master")
+    assert calls == [["rev-parse", "--abbrev-ref", "HEAD"]]
+
+
+def test_detached_head_is_refused(tmp_path):
+    run, calls = make_run(current_branch="HEAD")
+    with pytest.raises(GitError, match="'HEAD'"):
+        commit_queue("queue: add vid", cwd=tmp_path, run=run, branch="master")
+    assert not any(c[0] in ("add", "commit", "push") for c in calls)
+
+
+def test_no_branch_argument_skips_the_guard(tmp_path):
+    run, calls = make_run(current_branch="anything")
+    assert commit_queue("queue: add vid", cwd=tmp_path, run=run) is True
+    assert not any(c[0] == "rev-parse" for c in calls)

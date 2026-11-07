@@ -23,7 +23,15 @@ def default_run(args: list[str], cwd: Path):
         raise GitError(f"could not run git: {type(exc).__name__}") from None
 
 
-def commit_queue(message: str, *, cwd: Path = PROJECT_ROOT, run=default_run) -> bool:
+def commit_queue(message: str, *, branch: str | None = None, cwd: Path = PROJECT_ROOT, run=default_run) -> bool:
+    if branch is not None:
+        head = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd)
+        if head.returncode != 0:
+            raise GitError("cannot determine the current branch: " + head.stderr.strip())
+        current = head.stdout.strip()
+        if current != branch:
+            raise GitError(f"refusing to commit: you are on {current!r} but the queue lives on {branch!r}; "
+                           f"switch with `git checkout {branch}`")
     probe = run(["git", "diff", "--cached", "--name-only"], cwd)
     if probe.returncode != 0:
         raise GitError("git diff failed: " + probe.stderr.strip())
@@ -60,7 +68,7 @@ def _push_with_rebase_retry(cwd: Path, run) -> None:
     first = run(["git", "push"], cwd)
     if first.returncode == 0:
         return
-    pulled = run(["git", "pull", "--rebase"], cwd)
+    pulled = run(["git", "pull", "--rebase", "--autostash"], cwd)
     if pulled.returncode != 0:
         run(["git", "rebase", "--abort"], cwd)
         raise GitError("git pull --rebase failed: " + pulled.stderr.strip())

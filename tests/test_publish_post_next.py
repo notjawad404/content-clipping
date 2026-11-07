@@ -365,3 +365,75 @@ def test_dry_run_on_a_retry_does_not_record_a_duplicate(tmp_path):
     code, deleted, commits = run(tmp_path, client, dry_run=True)
     assert code == 0 and "recent" not in client.calls
     assert queue.load_all(tmp_path, "posted") == [] and deleted == [] and commits == []
+
+
+def test_stale_pending_duplicate_of_a_posted_entry_is_removed_not_posted(tmp_path):
+    entry = setup(tmp_path)
+    posted = {**entry, "media_id": "m-old", "permalink": "https://instagram.com/reel/old/"}
+    queue.save(tmp_path, "posted", posted)
+    client = FakeClient()
+    logs, deleted, commits = [], [], []
+    code = post_next(tmp_path, client, CFG, deleted.append, commit=commits.append, now=NOW, log=logs.append)
+    assert code == 0 and client.calls == [] and deleted == []
+    assert queue.load_all(tmp_path, "pending") == []
+    assert queue.load_all(tmp_path, "posted") == [posted]
+    assert commits == ["queue: remove stale duplicate vid_clip_01"]
+    assert "stale duplicate of vid_clip_01 already in posted/failed; removing the pending copy" in logs
+
+
+def test_stale_pending_duplicate_of_a_failed_entry_is_removed_and_failed_is_untouched(tmp_path):
+    entry = setup(tmp_path)
+    failed = {**entry, "attempts": 3, "last_error": "container ERROR"}
+    queue.save(tmp_path, "failed", failed)
+    code, deleted, commits = run(tmp_path, FakeClient())
+    assert code == 0 and deleted == []
+    assert queue.load_all(tmp_path, "pending") == [] and queue.load_all(tmp_path, "failed") == [failed]
+    assert commits == ["queue: remove stale duplicate vid_clip_01"]
+
+
+def test_stale_duplicate_removal_leaves_other_pending_entries_for_the_next_run(tmp_path):
+    entry = setup(tmp_path)
+    queue.save(tmp_path, "posted", {**entry, "media_id": "m-old"})
+    other = queue.new_entry(video_id="vid", clip_id="clip_02", campaign=None, caption="b",
+                            asset_url="https://example.invalid/b.mp4", asset_id=8, queued_at="2026-11-07T11:00:00Z")
+    queue.save(tmp_path, "pending", other)
+    client = FakeClient()
+    assert run(tmp_path, client)[0] == 0 and client.calls == []
+    assert queue.load_all(tmp_path, "pending") == [other]
+    assert run(tmp_path, client)[0] == 0 and "publish" in client.calls
+
+
+def test_dry_run_with_a_stale_duplicate_changes_nothing(tmp_path):
+    entry = setup(tmp_path)
+    queue.save(tmp_path, "posted", {**entry, "media_id": "m-old"})
+    client = FakeClient()
+    logs, commits = [], []
+    code = post_next(tmp_path, client, CFG, lambda a: None, dry_run=True, commit=commits.append, now=NOW,
+                     log=logs.append)
+    assert code == 0 and client.calls == [] and commits == []
+    assert len(queue.load_all(tmp_path, "pending")) == 1
+    assert any("stale duplicate" in line for line in logs)
+
+
+def test_main_commits_on_the_configured_queue_branch(monkeypatch):
+    monkeypatch.setenv("IG_ACCESS_TOKEN", "tok")
+    monkeypatch.setattr(post_next_module, "load_publish_config", lambda: {
+        "ig_account_id": "1", "graph_version": "v26.0", "clips_repo": "o/c", "queue_branch": "trunk"})
+    seen = {}
+    monkeypatch.setattr(post_next_module, "post_next", lambda *a, **kw: seen.update(kw) or 0)
+    pushed = []
+    monkeypatch.setattr(post_next_module.gitops, "commit_queue",
+                        lambda message, **kw: pushed.append((message, kw)) or True)
+    assert post_next_module.main([]) == 0
+    seen["commit"]("queue: posted x")
+    assert pushed == [("queue: posted x", {"branch": "trunk"})]
+
+
+def test_main_dry_run_passes_no_commit(monkeypatch):
+    monkeypatch.setenv("IG_ACCESS_TOKEN", "tok")
+    monkeypatch.setattr(post_next_module, "load_publish_config", lambda: {
+        "ig_account_id": "1", "graph_version": "v26.0", "clips_repo": "o/c", "queue_branch": "trunk"})
+    seen = {}
+    monkeypatch.setattr(post_next_module, "post_next", lambda *a, **kw: seen.update(kw) or 0)
+    assert post_next_module.main(["--dry-run"]) == 0
+    assert seen["commit"] is None and seen["dry_run"] is True

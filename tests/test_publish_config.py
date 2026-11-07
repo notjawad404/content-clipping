@@ -12,7 +12,7 @@ def write(tmp_path, text):
 def test_defaults_are_applied(tmp_path):
     cfg = load_publish_config(write(tmp_path, 'clips_repo: me/clips\nig_account_id: "123"\n'))
     assert cfg == {"clips_repo": "me/clips", "ig_account_id": "123", "graph_version": "v26.0",
-                   "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300}
+                   "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300}
 
 
 def test_account_id_written_as_a_number_becomes_a_string(tmp_path):
@@ -29,6 +29,7 @@ def test_the_shipped_config_is_valid():
     cfg = load_publish_config()
     assert cfg["clips_repo"] == "hammadalive7/content-clips"
     assert cfg["ig_account_id"] == "17841438716134897"
+    assert cfg["queue_branch"] == "master"
 
 
 def test_malformed_yaml_raises_config_error(tmp_path):
@@ -74,6 +75,8 @@ def test_invalid_numeric_setting_names_the_key(tmp_path, line):
 @pytest.mark.parametrize("line, key", [
     ("clips_repo: [1]", "clips_repo"),
     ('graph_version: ""', "graph_version"),
+    ('queue_branch: ""', "queue_branch"),
+    ("queue_branch: [1]", "queue_branch"),
     ("ig_account_id: [1]", "ig_account_id"),
     ("ig_account_id: true", "ig_account_id"),
 ])
@@ -87,3 +90,8 @@ def test_invalid_string_setting_names_the_key(tmp_path, line, key):
 def test_string_path_is_accepted(tmp_path):
     path = write(tmp_path, 'clips_repo: me/clips\nig_account_id: "123"\n')
     assert load_publish_config(str(path))["ig_account_id"] == "123"
+
+
+def test_queue_branch_can_be_overridden(tmp_path):
+    cfg = load_publish_config(write(tmp_path, 'clips_repo: me/clips\nig_account_id: "1"\nqueue_branch: main\n'))
+    assert cfg["queue_branch"] == "main"
