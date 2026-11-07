@@ -16,7 +16,10 @@ class RepoError(PublishError):
 
 
 def default_run(args: list[str]):
-    return subprocess.run(args, capture_output=True, text=True)
+    try:
+        return subprocess.run(args, capture_output=True, text=True)
+    except OSError as exc:
+        raise RepoError(f"could not run {args[0]}: {type(exc).__name__}") from None
 
 
 def _check(proc, what: str) -> str:
@@ -35,11 +38,15 @@ def ensure_release(repo: str, tag: str, run=default_run) -> None:
 def upload_asset(repo: str, tag: str, path: str | Path, run=default_run) -> tuple[str, int]:
     ensure_release(repo, tag, run)
     _check(run(["gh", "release", "upload", tag, str(path), "-R", repo, "--clobber"]), "upload asset")
-    release = json.loads(_check(run(["gh", "api", f"repos/{repo}/releases/tags/{tag}"]), "read release"))
+    raw = _check(run(["gh", "api", f"repos/{repo}/releases/tags/{tag}"]), "read release")
     name = Path(path).name
-    for asset in release.get("assets", []):
-        if asset["name"] == name:
-            return asset["browser_download_url"], int(asset["id"])
+    try:
+        release = json.loads(raw)
+        for asset in release.get("assets", []):
+            if asset["name"] == name:
+                return asset["browser_download_url"], int(asset["id"])
+    except (ValueError, KeyError, TypeError):
+        raise RepoError("unexpected response from gh api") from None
     raise RepoError(f"uploaded asset {name} not found in release {tag}")
 
 

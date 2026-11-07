@@ -63,3 +63,31 @@ def test_delete_asset_calls_the_delete_endpoint():
     run, calls = make_run()
     clips_repo.delete_asset("o/r", 42, run)
     assert calls == [["gh", "api", "-X", "DELETE", "repos/o/r/releases/assets/42"]]
+
+
+def test_default_run_reports_missing_gh_binary_as_repo_error(monkeypatch):
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr(clips_repo.subprocess, "run", missing)
+    with pytest.raises(RepoError, match="FileNotFoundError"):
+        clips_repo.default_run(["gh", "release", "view", "v-vid"])
+
+
+def test_upload_raises_repo_error_on_non_json_api_output():
+    def run(args):
+        if args[:3] == ["gh", "release", "view"]:
+            return proc(0)
+        if args[:3] == ["gh", "release", "upload"]:
+            return proc(0)
+        return proc(0, "<html>not json</html>")
+
+    with pytest.raises(RepoError, match="unexpected response"):
+        clips_repo.upload_asset("o/r", "v-vid", "/tmp/clip_01.mp4", run)
+
+
+def test_upload_raises_repo_error_when_asset_entry_lacks_fields():
+    broken = {"name": "clip_01.mp4"}
+    run, _ = make_run(assets=(broken,))
+    with pytest.raises(RepoError, match="unexpected response"):
+        clips_repo.upload_asset("o/r", "v-vid", "/tmp/clip_01.mp4", run)
