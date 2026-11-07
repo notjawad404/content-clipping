@@ -53,7 +53,7 @@ clipper queue <id>
 ```
 
 ### Queue
-Plain JSON files in the repo, one per clip, so history is auditable in git. Directories: `queue/pending/`, `queue/posted/`, `queue/failed/`. A tracked `queue/.gitkeep` keeps them present. Entry (`<video_id>_<clip_id>.json`):
+Plain JSON files in the repo, one per clip, so history is auditable in git. Directories: `queue/pending/`, `queue/posted/`, `queue/failed/`. The directories are created on demand (git does not track empty directories). Entry (`<video_id>_<clip_id>.json`):
 
 ```json
 {
@@ -163,4 +163,4 @@ Steps 1-3 are **done** (completed 2026-11-07). Kept here as a record and for red
 - **Reel specs** — the clipper's output (1080×1920, H.264/AAC, 20–90 s) is believed to meet Reels requirements, but the exact API length and file-size limits were not checked. Confirm them in the current docs and inspect the first real post in the feed.
 - **Instagram may reject or reduce reach** for reposted third-party content or watermarked clips; that is a platform-policy matter outside this system.
 - **Public exposure** of queued clips (see §2).
-- **Cron behaviour** — GitHub scheduled workflows can run several minutes late, and GitHub disables them after 60 days without repository activity. If you stop queueing clips for two months the schedule must be re-enabled by hand in the Actions tab.
+- **Cron behaviour** — GitHub scheduled workflows can run several minutes late, and GitHub auto-disables them after 60 days without repository activity only in public repositories; this repository is private, so that does not apply.

@@ -1733,10 +1733,10 @@ Before running anything below, tell the owner exactly what will be created (a **
 Run: `gh repo create hammadalive7/content-clips --public --description "Release assets that Instagram fetches when posting Reels" --add-readme`
 Expected: prints the new repo URL.
 
-- [ ] **Step 2: Create the private project repo and push `main` first so it becomes the default branch**
+- [ ] **Step 2: Create the private project repo and push `master` first so it becomes the default branch** (this repo's default branch is `master`, not `main`)
 
-Run: `gh repo create hammadalive7/content-clipping --private --source . --remote origin && git push -u origin main`
-Expected: remote `origin` added and `main` pushed. Then run `git push -u origin feature/clipper-v1`.
+Run: `gh repo create hammadalive7/content-clipping --private --source . --remote origin && git push -u origin master`
+Expected: remote `origin` added and `master` pushed. Then run `git push -u origin feature/clipper-v1`.
 
 - [ ] **Step 3: Owner creates the fine-grained token for `CLIPS_REPO_TOKEN`**
 
@@ -1766,7 +1766,7 @@ Expected: both `IG_ACCESS_TOKEN` and `CLIPS_REPO_TOKEN` are listed.
 
 **Interfaces:**
 - Consumes: everything above, plus an already rendered job in `output/<video_id>/` (see `ls output/`).
-- Produces: a verified real post and the scheduled workflow on `main`.
+- Produces: a verified real post and the scheduled workflow on `master`.
 
 Posting is public. The owner chooses which clip to post and confirms before Step 4.
 
@@ -1775,18 +1775,18 @@ Posting is public. The owner chooses which clip to post and confirms before Step
 GitHub only offers `workflow_dispatch` for workflows that exist on the default branch. After owner confirmation run:
 
 ```bash
-git checkout main && git merge --ff-only feature/clipper-v1 && git push origin main
+git checkout master && git merge --ff-only feature/clipper-v1 && git push origin master
 ```
 Expected: fast-forward succeeds. If it does not, stop and ask the owner how to integrate (do not force anything).
 
 - [ ] **Step 2: Queue one clip**
 
 Pick a job that has a rendered clip: `ls output/`. Then run `uv run clipper queue <video_id> --only clip_01`.
-Expected: `clip_01  queued  <title>` then `queued entries committed and pushed`; a file appears in `queue/pending/` on `origin/main`; a release `v-<video_id>` with `clip_01.mp4` exists in `hammadalive7/content-clips`.
+Expected: `clip_01  queued  <title>` then `queued entries committed and pushed`; a file appears in `queue/pending/` on `origin/master`; run `clipper queue` on `master` only (the command refuses other branches); a release `v-<video_id>` with `clip_01.mp4` exists in `hammadalive7/content-clips`.
 
 - [ ] **Step 3: Dry run in Actions**
 
-Run: `gh workflow run post-next.yml -R hammadalive7/content-clipping -f dry_run=true && sleep 8 && gh run watch -R hammadalive7/content-clipping $(gh run list -R hammadalive7/content-clipping --workflow post-next.yml --limit 1 --json databaseId --jq '.[0].databaseId')`
+Run: `gh workflow run post-next.yml -R hammadalive7/content-clipping -f dry_run=true && sleep 8 && gh run watch --exit-status -R hammadalive7/content-clipping $(gh run list -R hammadalive7/content-clipping --workflow post-next.yml --limit 1 --json databaseId --jq '.[0].databaseId')`
 Expected log lines: `next: <id> (<caption start>)` then `dry run: container FINISHED; not publishing`.
 
 If it instead fails, stop and report the exact message to the owner. Known possibilities: `container ERROR` (Instagram may not follow GitHub's redirect from the release download URL, which would need a design change such as serving the file from `raw.githubusercontent.com`); `unexpected content_publishing_limit response` (adjust the parsing in `InstagramClient.publishing_limit` to the real response); an error code 10 or 200 (permissions or account type). Do not retry in a loop.
@@ -1794,7 +1794,7 @@ If it instead fails, stop and report the exact message to the owner. Known possi
 - [ ] **Step 4: Real post (owner confirms the clip first)**
 
 Run the same command with `-f dry_run=false`.
-Expected: log line `posted <id>: https://www.instagram.com/...`; the entry moves to `queue/posted/` in a new commit from `github-actions[bot]`; the release asset is deleted; the Reel shows on the profile. Run `git pull` afterwards to fetch that commit.
+Expected: log line `posted <id>: https://www.instagram.com/...`; the entry moves to `queue/posted/` in a new commit from `github-actions[bot]`; the release asset is deleted; the Reel shows on the profile. Run `git pull --rebase --autostash` afterwards to fetch that commit.
 
 - [ ] **Step 5: Write the failing schedule test**
 
@@ -1821,11 +1821,11 @@ In `.github/workflows/post-next.yml`, add under `on:` before `workflow_dispatch:
 Run: `uv run pytest tests/test_workflows.py -v`
 Expected: PASS (3 passed)
 
-- [ ] **Step 7: Commit and push to main**
+- [ ] **Step 7: Commit and push to master**
 
 ```bash
 git add .github/workflows/post-next.yml tests/test_workflows.py
 git commit -m "feat: enable the Instagram posting schedule" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
-git push origin main
+git pull --rebase --autostash && git push origin master
 ```
-Expected: pushed. Tell the owner the schedule is on, that cron times are UTC (edit the cron line to change them), and that GitHub pauses scheduled workflows after 60 days without repository activity.
+Expected: pushed. Tell the owner the schedule is on, that cron times are UTC (edit the cron line to change them), and that GitHub only auto-pauses scheduled workflows after 60 days of inactivity in public repositories (this repo is private).
