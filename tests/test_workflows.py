@@ -44,3 +44,8 @@ def test_post_next_workflow_wiring_of_secrets_and_dry_run():
     live_branch = script.split("else")[1]
     assert "--dry-run" not in live_branch and "python -m clipper.publish.post_next" in live_branch
     assert script.split("else")[0].count("--dry-run") == 1
+
+
+def test_post_next_is_scheduled_three_times_a_day():
+    schedule = triggers(load())["schedule"]
+    assert schedule == [{"cron": "0 9,13,19 * * *"}]

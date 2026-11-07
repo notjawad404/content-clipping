@@ -1,6 +1,8 @@
 name: post-next
 
 on:
+  schedule:
+    - cron: "0 9,13,19 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
