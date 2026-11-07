@@ -37,9 +37,9 @@ Algorithm (all `gh`/`git` calls go through an injectable `run`, as in `clips_rep
 2. `pending = queue.load_all(root, "pending")`. If empty, print "nothing to post" and exit 0. The loop is bounded by the number of entries pending at the start.
 3. For the oldest pending entry (`queued_at`, then id; the same order `post_next` uses): record the ids of existing `workflow_dispatch` runs of `post-next.yml`, run `gh workflow run post-next.yml -f dry_run=false`, then poll `gh run list` (every 5 s, up to 90 s) for a new run id.
 4. `gh run watch <id> --exit-status`. A non-zero exit means failure: print the run URL and stop with exit 1. No automatic retry; running `post-now` again continues from the queue.
-5. After a successful run, `git pull --rebase --autostash`. The run must have moved the targeted entry to `queue/posted/<id>.json` with a `permalink`. If it did not (for example the daily quota was reached, or the run found nothing to do), print which entry is still pending and why the run was green, and stop with exit 1 so the caller never reports a post that did not happen.
+5. After a successful run, `git pull --rebase --autostash`. The run must have moved the targeted entry to `queue/posted/<id>.json` (the permalink is printed when present; a post without a returned link is still a post and is reported with its media id). If it was not moved (for example the daily quota was reached, or the run found nothing to do), print which entry is still pending and why the run was green, and stop with exit 1 so the caller never reports a post that did not happen.
 6. Print `posted <id>: <permalink>` and repeat from step 3 for the next entry.
-7. At the end print a summary line with the count posted and exit 0.
+7. At the end print `done: <n> posted`, where n is the number of entries that left `pending/` during the run, and exit 0.
 
 A scheduled cron run that happens during `post-now` is safe: the workflow's concurrency group serializes runs, and step 5 checks the targeted entry, not the run. If the cron run posted the targeted entry first, the check still passes and the next loop iteration continues with the next entry.
 
