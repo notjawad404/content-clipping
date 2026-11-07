@@ -2,24 +2,33 @@ from types import SimpleNamespace
 
 import pytest
 
+from clipper.publish import gitops
 from clipper.publish.gitops import GitError, commit_queue
 
 
-def make_run(staged=(), has_changes=True, push_codes=(0,), commit_code=0):
+def make_run(staged=(), has_changes=True, push_codes=(0,), commit_code=0, probe_code=0,
+             add_code=0, quiet_code=None, pull_codes=(0,), push_stderr=("rejected", "rejected")):
     calls = []
-    pushes = list(push_codes)
+    pushes = list(zip(push_codes, push_stderr))
+    pulls = list(pull_codes)
 
     def run(args, cwd):
         calls.append(args[1:])
         verb = args[1:3]
         if verb == ["diff", "--cached"] and "--name-only" in args:
-            return SimpleNamespace(returncode=0, stdout="\n".join(staged), stderr="")
+            return SimpleNamespace(returncode=probe_code, stdout="\n".join(staged), stderr="probe broke")
         if verb == ["diff", "--cached"] and "--quiet" in args:
-            return SimpleNamespace(returncode=1 if has_changes else 0, stdout="", stderr="")
+            code = quiet_code if quiet_code is not None else (1 if has_changes else 0)
+            return SimpleNamespace(returncode=code, stdout="", stderr="diff broke")
+        if args[1] == "add":
+            return SimpleNamespace(returncode=add_code, stdout="", stderr="add broke")
         if args[1] == "commit":
             return SimpleNamespace(returncode=commit_code, stdout="", stderr="commit failed")
         if args[1] == "push":
-            return SimpleNamespace(returncode=pushes.pop(0) if pushes else 0, stdout="", stderr="rejected")
+            code, err = pushes.pop(0) if pushes else (0, "")
+            return SimpleNamespace(returncode=code, stdout="", stderr=err)
+        if verb == ["pull", "--rebase"]:
+            return SimpleNamespace(returncode=pulls.pop(0) if pulls else 0, stdout="", stderr="conflict")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     return run, calls
@@ -56,3 +65,48 @@ def test_push_that_keeps_failing_raises(tmp_path):
     run, _ = make_run(push_codes=(1, 1))
     with pytest.raises(GitError, match="push"):
         commit_queue("queue: add vid", cwd=tmp_path, run=run)
+
+
+def test_missing_git_binary_raises_git_error(tmp_path, monkeypatch):
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(gitops.subprocess, "run", missing)
+    with pytest.raises(GitError, match="could not run git: FileNotFoundError"):
+        commit_queue("queue: add vid", cwd=tmp_path)
+
+
+def test_staged_probe_failure_raises_and_commits_nothing(tmp_path):
+    run, calls = make_run(probe_code=128)
+    with pytest.raises(GitError, match="git diff failed"):
+        commit_queue("queue: add vid", cwd=tmp_path, run=run)
+    assert not any(c[0] in ("add", "commit", "push") for c in calls)
+
+
+def test_git_add_failure_raises_and_commits_nothing(tmp_path):
+    run, calls = make_run(add_code=1)
+    with pytest.raises(GitError, match="git add failed"):
+        commit_queue("queue: add vid", cwd=tmp_path, run=run)
+    assert not any(c[0] in ("commit", "push") for c in calls)
+
+
+def test_diff_quiet_error_is_not_read_as_no_changes(tmp_path):
+    run, calls = make_run(quiet_code=128)
+    with pytest.raises(GitError, match="git diff failed"):
+        commit_queue("queue: add vid", cwd=tmp_path, run=run)
+    assert not any(c[0] in ("commit", "push") for c in calls)
+
+
+def test_pull_failure_aborts_rebase_and_raises(tmp_path):
+    run, calls = make_run(push_codes=(1, 0), pull_codes=(1,))
+    with pytest.raises(GitError, match="git pull --rebase failed"):
+        commit_queue("queue: add vid", cwd=tmp_path, run=run)
+    assert ["rebase", "--abort"] in calls
+    assert ["push"] in calls and calls.count(["push"]) == 1
+
+
+def test_second_push_failure_includes_push_stderr(tmp_path):
+    run, calls = make_run(push_codes=(1, 1), push_stderr=("net down", "remote rejected"))
+    with pytest.raises(GitError, match="git push failed: remote rejected"):
+        commit_queue("queue: add vid", cwd=tmp_path, run=run)
+    assert calls.count(["pull", "--rebase"]) == 1
