@@ -22,6 +22,19 @@ def _short(caption: str) -> str:
 MANUAL_CHECK_ERROR = "container already PUBLISHED; media id unknown, check the Instagram profile"
 
 
+class _NotTheClipsFault(Exception):
+    """An Instagram error before any container work (quota check, early duplicate check): never an attempt."""
+
+
+def _outside_the_clip(call, *args):
+    try:
+        return call(*args)
+    except (TokenInvalid, QuotaExceeded):
+        raise
+    except IgError as exc:
+        raise _NotTheClipsFault(str(exc)) from None
+
+
 class _AlreadyPublished(Exception):
     """The retry's container was already published, but its media id was never committed."""
 
@@ -73,7 +86,7 @@ def _publish(root: Path, client, cfg: dict, entry: dict, dry_run: bool, commit: 
     is_retry = bool(entry.get("container_id"))
     if is_retry and not dry_run:
         # A previous run may have published and then failed to commit: look before touching any container.
-        duplicate = _recent_duplicate(client, entry["caption"], now)
+        duplicate = _outside_the_clip(_recent_duplicate, client, entry["caption"], now)
         if duplicate:
             _record_duplicate(root, entry, duplicate, commit, log)
             return True
@@ -199,13 +212,16 @@ def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], objec
                 return 0
             log("already published on an earlier run; finishing cleanup")
         else:
-            used, total = client.publishing_limit()
+            used, total = _outside_the_clip(client.publishing_limit)
             if used >= total:
                 log(f"publishing quota reached ({used}/{total}); will retry on the next run")
                 return 0
             if not _publish(root, client, cfg, entry, dry_run, commit, now, log):
                 return 0
         _finalize(root, entry, delete_asset, commit, log)
+    except _NotTheClipsFault as exc:
+        log(f"error: {exc}")
+        return 1
     except _AlreadyPublished:
         return _needs_manual_check(root, entry, commit, log, dry_run)
     except TokenInvalid:

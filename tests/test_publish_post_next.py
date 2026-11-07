@@ -437,3 +437,74 @@ def test_main_dry_run_passes_no_commit(monkeypatch):
     monkeypatch.setattr(post_next_module, "post_next", lambda *a, **kw: seen.update(kw) or 0)
     assert post_next_module.main(["--dry-run"]) == 0
     assert seen["commit"] is None and seen["dry_run"] is True
+
+
+def snapshot(tmp_path):
+    return {state: queue.load_all(tmp_path, state) for state in queue.STATES}
+
+
+def test_limit_endpoint_error_is_not_the_clips_fault(tmp_path):
+    setup(tmp_path)
+    before = snapshot(tmp_path)
+    client = FakeClient()
+    client.errors["limit"] = ApiError("(#100) wrong account id", 100)
+    code, deleted, logs = run_logged(tmp_path, client, commit=failing_commit("never"))
+    assert code == 1 and deleted == []
+    assert client.calls == ["limit"]
+    assert snapshot(tmp_path) == before and before["pending"][0]["attempts"] == 0
+    assert logs[-1] == "error: (#100) wrong account id"
+
+
+def test_transient_limit_error_never_moves_a_clip_to_failed_however_often_it_repeats(tmp_path):
+    setup(tmp_path)
+    client = FakeClient()
+    client.errors["limit"] = ApiError("network error: TimeoutError")
+    for _ in range(5):
+        assert run(tmp_path, client)[0] == 1
+    pending = queue.load_all(tmp_path, "pending")[0]
+    assert pending["attempts"] == 0 and queue.load_all(tmp_path, "failed") == []
+
+
+def test_early_duplicate_check_error_leaves_the_entry_untouched(tmp_path):
+    setup(tmp_path, container_id="c-old", attempts=1)
+    before = snapshot(tmp_path)
+    client = FakeClient()
+    client.errors["recent"] = ApiError("network error: TimeoutError")
+    code, deleted, commits = run(tmp_path, client)
+    assert code == 1 and deleted == [] and commits == []
+    assert client.calls == ["limit", "recent"]
+    assert snapshot(tmp_path) == before
+
+
+def test_early_duplicate_check_token_error_reports_the_token_and_counts_nothing(tmp_path):
+    setup(tmp_path, container_id="c-old")
+    client = FakeClient()
+    client.errors["recent"] = TokenInvalid("Invalid OAuth access token")
+    code, _, logs = run_logged(tmp_path, client)
+    assert code == 1 and queue.load_all(tmp_path, "pending")[0]["attempts"] == 0
+    assert any("rejected the access token" in line for line in logs)
+
+
+def test_create_failure_still_counts_an_attempt(tmp_path):
+    setup(tmp_path)
+    client = FakeClient()
+    client.errors["create"] = ApiError("(#9007) media not ready", 9007)
+    code, _, _ = run(tmp_path, client)
+    pending = queue.load_all(tmp_path, "pending")[0]
+    assert code == 1 and pending["attempts"] == 1 and pending["last_error"] == "(#9007) media not ready"
+
+
+def test_post_wait_duplicate_check_error_still_counts_an_attempt(tmp_path):
+    setup(tmp_path, container_id="c-old")
+
+    class SecondRecentFails(FakeClient):
+        def recent_media(self, limit=5):
+            self._step("recent")
+            if self.calls.count("recent") > 1:
+                raise ApiError("network error: TimeoutError")
+            return []
+
+    client = SecondRecentFails(status="FINISHED")
+    code, _, _ = run(tmp_path, client)
+    assert code == 1 and "publish" not in client.calls
+    assert queue.load_all(tmp_path, "pending")[0]["attempts"] == 1
