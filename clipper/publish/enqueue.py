@@ -39,8 +39,12 @@ def enqueue_job(job: Job, root: Path, repo: str, *, upload=clips_repo.upload_ass
             except RepoError as exc:
                 rows.append((cid, title, f"failed: {exc}"))
                 continue
-            queue.save(root, "pending", queue.new_entry(
-                video_id=job.video_id, clip_id=cid, campaign=campaign, caption=caption,
-                asset_url=url, asset_id=asset_id, queued_at=stamp))
+            entry = queue.new_entry(video_id=job.video_id, clip_id=cid, campaign=campaign, caption=caption,
+                                    asset_url=url, asset_id=asset_id, queued_at=stamp)
+            try:
+                queue.save(root, "pending", entry)
+            except OSError as exc:
+                rows.append((cid, title, f"failed: could not write the queue entry ({type(exc).__name__})"))
+                continue
             rows.append((cid, title, "queued"))
     return rows

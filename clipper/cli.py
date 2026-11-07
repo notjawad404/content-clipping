@@ -175,9 +175,12 @@ def cmd_queue(args: argparse.Namespace) -> int:
     rows = enqueue_job(job_for(args.video_id), QUEUE_ROOT, cfg["clips_repo"], only=args.only)
     for cid, title, status in rows:
         print(f"{cid}  {status}  {title}")
-    if any(status == "queued" for _, _, status in rows):
-        commit_queue(f"queue: add {args.video_id}")
-        print("queued entries committed and pushed")
+    if any(status in ("queued", "skipped: already queued") for _, _, status in rows):
+        # already-queued rows may be local-only from an earlier failed commit or push, so retry
+        if commit_queue(f"queue: add {args.video_id}"):
+            print("queued entries committed and pushed")
+        else:
+            print("nothing new to commit")
     return 1 if any(status.startswith("failed") for _, _, status in rows) else 0
 
 

@@ -105,3 +105,20 @@ def test_an_unparseable_clips_resolved_raises_publish_error(tmp_path):
     job.clips_resolved.write_text("{not json")
     with pytest.raises(PublishError, match="clips.resolved.json"):
         enqueue_job(job, tmp_path / "queue", "o/clips", upload=Uploader(), now=NOW)
+
+
+def test_a_queue_write_failure_is_isolated_to_its_clip(tmp_path, monkeypatch):
+    job = make_job(tmp_path, ["clip_01", "clip_02"], ["clip_01", "clip_02"])
+    root = tmp_path / "queue"
+    real_save = queue.save
+
+    def flaky_save(root_, state, entry):
+        if entry["id"] == "vid_clip_01":
+            raise PermissionError("disk says no: /secret/path")
+        real_save(root_, state, entry)
+
+    monkeypatch.setattr(queue, "save", flaky_save)
+    rows = enqueue_job(job, root, "o/clips", upload=Uploader(), now=NOW)
+    assert rows[0] == ("clip_01", "title clip_01", "failed: could not write the queue entry (PermissionError)")
+    assert rows[1] == ("clip_02", "title clip_02", "queued")
+    assert [e["id"] for e in queue.load_all(root, "pending")] == ["vid_clip_02"]

@@ -7,7 +7,8 @@ from clipper.publish.gitops import GitError, commit_queue
 
 
 def make_run(staged=(), has_changes=True, push_codes=(0,), commit_code=0, probe_code=0,
-             add_code=0, quiet_code=None, pull_codes=(0,), push_stderr=("rejected", "rejected")):
+             add_code=0, quiet_code=None, pull_codes=(0,), push_stderr=("rejected", "rejected"),
+             ahead="0", rev_list_code=0):
     calls = []
     pushes = list(zip(push_codes, push_stderr))
     pulls = list(pull_codes)
@@ -20,6 +21,8 @@ def make_run(staged=(), has_changes=True, push_codes=(0,), commit_code=0, probe_
         if verb == ["diff", "--cached"] and "--quiet" in args:
             code = quiet_code if quiet_code is not None else (1 if has_changes else 0)
             return SimpleNamespace(returncode=code, stdout="", stderr="diff broke")
+        if args[1] == "rev-list":
+            return SimpleNamespace(returncode=rev_list_code, stdout=ahead, stderr="no upstream")
         if args[1] == "add":
             return SimpleNamespace(returncode=add_code, stdout="", stderr="add broke")
         if args[1] == "commit":
@@ -110,3 +113,56 @@ def test_second_push_failure_includes_push_stderr(tmp_path):
     with pytest.raises(GitError, match="git push failed: remote rejected"):
         commit_queue("queue: add vid", cwd=tmp_path, run=run)
     assert calls.count(["pull", "--rebase"]) == 1
+
+
+def test_unpushed_commit_with_nothing_new_to_commit_is_pushed(tmp_path):
+    run, calls = make_run(has_changes=False, ahead="1\n")
+    assert commit_queue("queue: retry", cwd=tmp_path, run=run) is True
+    assert ["rev-list", "--count", "@{u}..HEAD"] in calls
+    assert ["push"] in calls and not any(c[0] == "commit" for c in calls)
+
+
+def test_nothing_to_commit_and_nothing_unpushed_does_not_push(tmp_path):
+    run, calls = make_run(has_changes=False, ahead="0\n")
+    assert commit_queue("queue: retry", cwd=tmp_path, run=run) is False
+    assert ["rev-list", "--count", "@{u}..HEAD"] in calls
+    assert not any(c[0] in ("commit", "push") for c in calls)
+
+
+def test_unpushed_check_failure_raises(tmp_path):
+    run, calls = make_run(has_changes=False, rev_list_code=128)
+    with pytest.raises(GitError, match="cannot tell whether there are unpushed commits: no upstream"):
+        commit_queue("queue: retry", cwd=tmp_path, run=run)
+    assert not any(c[0] in ("commit", "push") for c in calls)
+
+
+def test_unpushed_check_with_garbage_output_raises(tmp_path):
+    run, _ = make_run(has_changes=False, ahead="fatal?")
+    with pytest.raises(GitError, match="cannot tell whether there are unpushed commits"):
+        commit_queue("queue: retry", cwd=tmp_path, run=run)
+
+
+def test_retry_push_rejection_pulls_with_rebase_and_retries(tmp_path):
+    run, calls = make_run(has_changes=False, ahead="2", push_codes=(1, 0))
+    assert commit_queue("queue: retry", cwd=tmp_path, run=run) is True
+    assert ["pull", "--rebase"] in calls and calls.count(["push"]) == 2
+
+
+def test_retry_pull_failure_aborts_rebase_and_raises(tmp_path):
+    run, calls = make_run(has_changes=False, ahead="2", push_codes=(1, 0), pull_codes=(1,))
+    with pytest.raises(GitError, match="git pull --rebase failed"):
+        commit_queue("queue: retry", cwd=tmp_path, run=run)
+    assert ["rebase", "--abort"] in calls and calls.count(["push"]) == 1
+
+
+def test_retry_second_push_failure_raises(tmp_path):
+    run, _ = make_run(has_changes=False, ahead="2", push_codes=(1, 1), push_stderr=("net", "remote rejected"))
+    with pytest.raises(GitError, match="git push failed: remote rejected"):
+        commit_queue("queue: retry", cwd=tmp_path, run=run)
+
+
+def test_unrelated_staged_files_still_refuse_before_the_unpushed_check(tmp_path):
+    run, calls = make_run(staged=("README.md",), has_changes=False, ahead="3")
+    with pytest.raises(GitError, match="README.md"):
+        commit_queue("queue: retry", cwd=tmp_path, run=run)
+    assert not any(c[0] in ("rev-list", "push") for c in calls)

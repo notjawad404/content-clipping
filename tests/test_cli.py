@@ -215,17 +215,62 @@ def test_parser_queue_and_post_next():
     assert build_parser().parse_args(["post-next", "--dry-run"]).dry_run
 
 
-def test_queue_command_commits_only_when_something_was_queued(monkeypatch, capsys):
+def queue_cli(monkeypatch, rows, commit=lambda message: True):
     commits = []
     monkeypatch.setattr(cli, "load_publish_config", lambda: {"clips_repo": "o/clips"})
-    monkeypatch.setattr(cli, "commit_queue", lambda message: commits.append(message))
-    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "T", "queued")])
+    monkeypatch.setattr(cli, "commit_queue", lambda message: commits.append(message) or commit(message))
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: rows)
+    return commits
+
+
+def test_queue_command_commits_when_something_was_queued(monkeypatch, capsys):
+    commits = queue_cli(monkeypatch, [("clip_01", "T", "queued")])
     assert cli.main(["queue", "vid"]) == 0
     assert commits == ["queue: add vid"]
-    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "T", "skipped: already queued")])
+    out = capsys.readouterr().out
+    assert "clip_01" in out and "queued entries committed and pushed" in out
+
+
+def test_queue_command_retries_the_commit_when_every_clip_is_already_queued(monkeypatch):
+    commits = queue_cli(monkeypatch, [("clip_01", "T", "skipped: already queued")])
     assert cli.main(["queue", "vid"]) == 0
     assert commits == ["queue: add vid"]
-    assert "clip_01" in capsys.readouterr().out
+
+
+def test_queue_command_does_not_commit_when_no_clip_was_queued_or_retryable(monkeypatch):
+    commits = queue_cli(monkeypatch, [("clip_01", "T", "skipped: no rendered mp4"), ("clip_02", "T", "failed: x")])
+    assert cli.main(["queue", "vid"]) == 1
+    commits_skipped = queue_cli(monkeypatch, [("clip_01", "T", "skipped: no rendered mp4")])
+    assert cli.main(["queue", "vid"]) == 0
+    assert commits == [] and commits_skipped == []
+    empty = queue_cli(monkeypatch, [])
+    assert cli.main(["queue", "vid"]) == 0 and empty == []
+
+
+def test_queue_command_says_nothing_new_when_commit_queue_returns_false(monkeypatch, capsys):
+    queue_cli(monkeypatch, [("clip_01", "T", "skipped: already queued")], commit=lambda message: False)
+    assert cli.main(["queue", "vid"]) == 0
+    out = capsys.readouterr().out
+    assert "nothing new to commit" in out and "committed and pushed" not in out
+
+
+def test_queue_command_second_run_retries_after_a_failed_commit(monkeypatch, capsys):
+    results = iter([GitError("git push failed: rejected"), True])
+
+    def commit(message):
+        result = next(results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    commits = queue_cli(monkeypatch, [("clip_01", "T", "queued")], commit=commit)
+    assert cli.main(["queue", "vid"]) == 2
+    assert "error: git push failed: rejected" in capsys.readouterr().out
+    queue_cli_rows = [("clip_01", "T", "skipped: already queued")]
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: queue_cli_rows)
+    assert cli.main(["queue", "vid"]) == 0
+    assert commits == ["queue: add vid", "queue: add vid"]
+    assert "queued entries committed and pushed" in capsys.readouterr().out
 
 
 def test_queue_command_commits_the_queued_clips_but_exits_nonzero_when_any_failed(monkeypatch, capsys):

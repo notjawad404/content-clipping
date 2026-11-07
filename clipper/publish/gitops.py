@@ -35,20 +35,35 @@ def commit_queue(message: str, *, cwd: Path = PROJECT_ROOT, run=default_run) -> 
         raise GitError("git add failed: " + added.stderr.strip())
     quiet = run(["git", "diff", "--cached", "--quiet", "--", "queue"], cwd)
     if quiet.returncode == 0:
-        return False
+        ahead = run(["git", "rev-list", "--count", "@{u}..HEAD"], cwd)
+        if ahead.returncode != 0:
+            raise GitError("cannot tell whether there are unpushed commits: " + ahead.stderr.strip())
+        try:
+            unpushed = int(ahead.stdout.strip())
+        except ValueError:
+            raise GitError("cannot tell whether there are unpushed commits: unexpected output "
+                           + repr(ahead.stdout.strip())) from None
+        if unpushed == 0:
+            return False
+        _push_with_rebase_retry(cwd, run)
+        return True
     if quiet.returncode != 1:
         raise GitError("git diff failed: " + quiet.stderr.strip())
     committed = run(["git", "commit", "-m", message], cwd)
     if committed.returncode != 0:
         raise GitError(f"git commit failed: {committed.stderr.strip()}")
+    _push_with_rebase_retry(cwd, run)
+    return True
+
+
+def _push_with_rebase_retry(cwd: Path, run) -> None:
     first = run(["git", "push"], cwd)
     if first.returncode == 0:
-        return True
+        return
     pulled = run(["git", "pull", "--rebase"], cwd)
     if pulled.returncode != 0:
         run(["git", "rebase", "--abort"], cwd)
         raise GitError("git pull --rebase failed: " + pulled.stderr.strip())
     second = run(["git", "push"], cwd)
-    if second.returncode == 0:
-        return True
-    raise GitError("git push failed: " + second.stderr.strip())
+    if second.returncode != 0:
+        raise GitError("git push failed: " + second.stderr.strip())
