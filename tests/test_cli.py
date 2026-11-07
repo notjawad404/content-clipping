@@ -4,6 +4,7 @@ from clipper import cli
 from clipper.cli import build_parser
 from clipper.fetch import FetchError
 from clipper.jobs import job_for
+from clipper.publish.gitops import GitError
 
 
 def test_parser_produce_options():
@@ -206,3 +207,69 @@ def test_bot_check_stops_fetching_and_records_hint(tmp_path, monkeypatch, capsys
     assert (st.job.out / "summary.md").exists()
     captured = capsys.readouterr()
     assert "YouTube bot check" in captured.out + captured.err
+
+
+def test_parser_queue_and_post_next():
+    args = build_parser().parse_args(["queue", "abc", "--only", "clip_01"])
+    assert args.video_id == "abc" and args.only == ["clip_01"]
+    assert build_parser().parse_args(["post-next", "--dry-run"]).dry_run
+
+
+def test_queue_command_commits_only_when_something_was_queued(monkeypatch, capsys):
+    commits = []
+    monkeypatch.setattr(cli, "load_publish_config", lambda: {"clips_repo": "o/clips"})
+    monkeypatch.setattr(cli, "commit_queue", lambda message: commits.append(message))
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "T", "queued")])
+    assert cli.main(["queue", "vid"]) == 0
+    assert commits == ["queue: add vid"]
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "T", "skipped: already queued")])
+    assert cli.main(["queue", "vid"]) == 0
+    assert commits == ["queue: add vid"]
+    assert "clip_01" in capsys.readouterr().out
+
+
+def test_queue_command_commits_the_queued_clips_but_exits_nonzero_when_any_failed(monkeypatch, capsys):
+    commits = []
+    monkeypatch.setattr(cli, "load_publish_config", lambda: {"clips_repo": "o/clips"})
+    monkeypatch.setattr(cli, "commit_queue", lambda message: commits.append(message))
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [
+        ("clip_01", "A", "failed: upload asset failed: denied"), ("clip_02", "B", "queued")])
+    assert cli.main(["queue", "vid"]) == 1
+    assert commits == ["queue: add vid"]
+    assert "failed: upload asset failed: denied" in capsys.readouterr().out
+
+
+def test_queue_command_does_not_commit_when_every_clip_failed(monkeypatch):
+    commits = []
+    monkeypatch.setattr(cli, "load_publish_config", lambda: {"clips_repo": "o/clips"})
+    monkeypatch.setattr(cli, "commit_queue", lambda message: commits.append(message))
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "A", "failed: x")])
+    assert cli.main(["queue", "vid"]) == 1
+    assert commits == []
+
+
+def test_queue_command_reports_a_commit_failure_as_one_line_error(monkeypatch, capsys):
+    def boom(message):
+        raise GitError("git push failed: rejected")
+
+    monkeypatch.setattr(cli, "load_publish_config", lambda: {"clips_repo": "o/clips"})
+    monkeypatch.setattr(cli, "commit_queue", boom)
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "T", "queued")])
+    assert cli.main(["queue", "vid"]) == 2
+    out = capsys.readouterr().out
+    assert "error: git push failed: rejected" in out and "Traceback" not in out
+
+
+def test_queue_command_reports_a_missing_clips_resolved_as_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "load_publish_config", lambda: {"clips_repo": "o/clips"})
+    monkeypatch.setattr(cli, "job_for", lambda video_id: job_for(video_id, jobs_dir=tmp_path / "jobs",
+                                                                  output_dir=tmp_path / "out"))
+    assert cli.main(["queue", "vid"]) == 2
+    assert capsys.readouterr().out.startswith("error: ")
+
+
+def test_post_next_command_delegates_to_the_module(monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli.post_next_mod, "main", lambda argv: seen.append(argv) or 0)
+    assert cli.main(["post-next", "--dry-run"]) == 0 and cli.main(["post-next"]) == 0
+    assert seen == [["--dry-run"], []]

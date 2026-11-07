@@ -15,6 +15,12 @@ from clipper.config import ConfigError, load_config
 from clipper.env import PROJECT_ROOT, prepend_ffmpeg_to_path
 from clipper.fetch import FetchError
 from clipper.jobs import Job, is_fresh, job_for, timed
+from clipper.publish import PublishError
+from clipper.publish import post_next as post_next_mod
+from clipper.publish.config import load_publish_config
+from clipper.publish.enqueue import enqueue_job
+from clipper.publish.gitops import commit_queue
+from clipper.publish.queue import QUEUE_ROOT
 
 
 def _cfg(job: Job) -> dict:
@@ -164,6 +170,21 @@ def cmd_finish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_queue(args: argparse.Namespace) -> int:
+    cfg = load_publish_config()
+    rows = enqueue_job(job_for(args.video_id), QUEUE_ROOT, cfg["clips_repo"], only=args.only)
+    for cid, title, status in rows:
+        print(f"{cid}  {status}  {title}")
+    if any(status == "queued" for _, _, status in rows):
+        commit_queue(f"queue: add {args.video_id}")
+        print("queued entries committed and pushed")
+    return 1 if any(status.startswith("failed") for _, _, status in rows) else 0
+
+
+def cmd_post_next(args: argparse.Namespace) -> int:
+    return post_next_mod.main(["--dry-run"] if args.dry_run else [])
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="clipper", description="Local podcast clipper")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -182,11 +203,16 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--force", nargs="+", choices=["video", "reframe", "render"])
     f = sub.add_parser("finish", help="delete downloaded media, keep transcripts and outputs")
     f.add_argument("video_id")
+    q = sub.add_parser("queue", help="upload rendered clips and queue them for Instagram posting")
+    q.add_argument("video_id")
+    q.add_argument("--only", nargs="+")
+    n = sub.add_parser("post-next", help="post the oldest queued clip to Instagram (normally run by GitHub Actions)")
+    n.add_argument("--dry-run", action="store_true")
     return parser
 
 
 HANDLERS = {"doctor": cmd_doctor, "prepare": cmd_prepare, "resolve": cmd_resolve,
-            "produce": cmd_produce, "finish": cmd_finish}
+            "produce": cmd_produce, "finish": cmd_finish, "queue": cmd_queue, "post-next": cmd_post_next}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -194,6 +220,6 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return HANDLERS[args.command](args)
-    except (ConfigError, FetchError, ClipError, FileNotFoundError) as exc:
+    except (ConfigError, FetchError, ClipError, PublishError, FileNotFoundError) as exc:
         print(f"error: {exc}")
         return 2
