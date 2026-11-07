@@ -13,11 +13,13 @@ uv run clipper doctor
 
 ## Use
 
-In Claude Code, in this folder:
+In Claude Code, in this folder, paste a YouTube link:
 
-> Run the clipper on https://www.youtube.com/watch?v=… for the `<campaign>` campaign
+> https://www.youtube.com/watch?v=…
 
-Add tweaks in plain words: "only the best 3", "under 30 seconds", "no zooms", "blue captions", "review first". Clips have no sound effects.
+By default Claude makes up to 5 clips and posts every clip that passes to Instagram, then lists the Reel links. Add plain-word changes: a count ("only 3", "10 clips"), "schedule them" or "spread them through the day" (queue only; the cron posts 3 a day at 09:00, 13:00 and 19:00 UTC), "campaign `<name>`" (otherwise Claude picks one from the video only on a clear match), "under 30 seconds", "no zooms", "blue captions", "review first". Clips have no sound effects.
+
+Posting needs `gh auth login` and the `master` branch checked out. If posting stops with an error, run `uv run clipper post-now` to continue from the queue.
 
 Clips land in `output/<video_id>/`: `clip_XX.mp4`, `clip_XX_post.md` (captions per platform) and `summary.md`.
 

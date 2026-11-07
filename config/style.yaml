@@ -1,5 +1,5 @@
 # Default look and behaviour. Campaign files and run overrides are merged on top.
-max_clips: 8
+max_clips: 5
 min_score: 7.0
 max_overlap: 0.5
 review_first: false

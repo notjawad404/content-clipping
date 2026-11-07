@@ -43,3 +43,7 @@ def test_repo_style_yaml_loads():
     cfg = load_config()
     assert cfg["length"]["max"] == 90
     assert cfg["captions"]["max_chars"] == 15
+
+
+def test_shipped_style_defaults_to_five_clips():
+    assert load_config(None)["max_clips"] == 5
