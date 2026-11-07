@@ -4,7 +4,7 @@ from clipper.publish import post_next as post_next_module, queue
 from clipper.publish.clips_repo import RepoError
 from clipper.publish.config import PublishConfigError
 from clipper.publish.gitops import GitError
-from clipper.publish.instagram import ProcessingFailed, QuotaExceeded, TokenInvalid
+from clipper.publish.instagram import ApiError, ProcessingFailed, QuotaExceeded, TokenInvalid
 from clipper.publish.post_next import post_next
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=timezone.utc)
@@ -294,13 +294,68 @@ def test_retry_recovers_a_published_duplicate_before_creating_a_container(tmp_pa
     assert posted["attempts"] == 0 and posted["container_id"] == "c-old"
 
 
-def test_retry_with_an_old_published_container_and_an_old_duplicate_publishes_a_new_clip(tmp_path):
-    setup(tmp_path, container_id="c-old")
+MANUAL_CHECK = "container already PUBLISHED; media id unknown, check the Instagram profile"
+
+
+def test_published_container_with_no_duplicate_is_moved_to_failed_without_posting_again(tmp_path):
+    setup(tmp_path, container_id="c-old", attempts=1)
     recent = [{"id": "m-9", "caption": CAPTION, "timestamp": "2026-11-05T11:00:00+0000"}]
     client = FakeClient(status="PUBLISHED", recent=recent)
-    assert run(tmp_path, client)[0] == 0
-    assert {"create", "wait", "publish"} <= set(client.calls)
-    assert queue.load_all(tmp_path, "posted")[0]["media_id"] == "m-1"
+    logs = []
+    deleted, commits = [], []
+    code = post_next(tmp_path, client, CFG, deleted.append, commit=commits.append, now=NOW, log=logs.append)
+    assert code == 1 and deleted == []
+    assert not {"create", "wait", "publish"} & set(client.calls)
+    assert queue.load_all(tmp_path, "pending") == [] and queue.load_all(tmp_path, "posted") == []
+    failed = queue.load_all(tmp_path, "failed")[0]
+    assert failed["attempts"] == 1 and failed["last_error"] == MANUAL_CHECK
+    assert failed["container_id"] == "c-old" and failed["media_id"] is None
+    assert commits == ["queue: needs a manual check: vid_clip_01"]
+    assert any("PUBLISHED" in line for line in logs)
+
+
+def test_published_container_with_a_recent_duplicate_is_still_recorded_as_posted(tmp_path):
+    setup(tmp_path, container_id="c-old")
+    recent = [{"id": "m-9", "caption": CAPTION, "timestamp": "2026-11-07T11:00:00+0000"}]
+    client = FakeClient(status="PUBLISHED", recent=recent)
+    code, deleted, _ = run(tmp_path, client)
+    assert code == 0 and deleted == [7]
+    assert queue.load_all(tmp_path, "posted")[0]["media_id"] == "m-9"
+    assert queue.load_all(tmp_path, "failed") == []
+
+
+def test_dry_run_with_a_published_container_changes_nothing(tmp_path):
+    setup(tmp_path, container_id="c-old")
+    client = FakeClient(status="PUBLISHED")
+    logs = []
+    deleted, commits = [], []
+    code = post_next(tmp_path, client, CFG, deleted.append, dry_run=True, commit=commits.append, now=NOW,
+                     log=logs.append)
+    assert code == 1 and deleted == [] and commits == []
+    assert not {"create", "wait", "publish"} & set(client.calls)
+    pending = queue.load_all(tmp_path, "pending")[0]
+    assert pending["attempts"] == 0 and pending["last_error"] is None
+    assert queue.load_all(tmp_path, "failed") == []
+    assert any("PUBLISHED" in line for line in logs)
+
+
+def test_discarded_container_logs_its_status(tmp_path):
+    setup(tmp_path, container_id="c-old")
+    client = FakeClient(status="EXPIRED")
+    logs = []
+    code = post_next(tmp_path, client, CFG, lambda a: None, commit=lambda m: None, now=NOW, log=logs.append)
+    assert code == 0 and "create" in client.calls
+    assert any("c-old" in line and "EXPIRED" in line for line in logs)
+
+
+def test_discarded_container_logs_a_status_call_failure_by_class_name(tmp_path):
+    setup(tmp_path, container_id="c-old")
+    client = FakeClient()
+    client.errors["status"] = ApiError("network error: TimeoutError")
+    logs = []
+    code = post_next(tmp_path, client, CFG, lambda a: None, commit=lambda m: None, now=NOW, log=logs.append)
+    assert code == 0 and "create" in client.calls
+    assert any("c-old" in line and "ApiError" in line for line in logs)
 
 
 def test_dry_run_on_a_retry_does_not_record_a_duplicate(tmp_path):

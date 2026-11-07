@@ -19,13 +19,30 @@ def _short(caption: str) -> str:
     return caption[:40] + ("…" if len(caption) > 40 else "")
 
 
-def _container_usable(client, container_id: str) -> bool:
+MANUAL_CHECK_ERROR = "container already PUBLISHED; media id unknown, check the Instagram profile"
+
+
+class _AlreadyPublished(Exception):
+    """The retry's container was already published, but its media id was never committed."""
+
+
+def _container_status(client, container_id: str, log: Callable[[str], None]) -> str | None:
+    """The container's status, or None (logged) when the status call failed."""
     try:
-        return client.container_status(container_id) in ("IN_PROGRESS", "FINISHED")
+        return client.container_status(container_id)
     except TokenInvalid:
         raise
-    except IgError:
-        return False
+    except IgError as exc:
+        log(f"container {container_id}: status call failed ({type(exc).__name__}); creating a new container")
+        return None
+
+
+def _container_usable(status: str | None, container_id: str, log: Callable[[str], None]) -> bool:
+    if status in ("IN_PROGRESS", "FINISHED"):
+        return True
+    if status is not None:
+        log(f"container {container_id} has status {status}; creating a new container")
+    return False
 
 
 def _recent_duplicate(client, caption: str, now: datetime) -> dict | None:
@@ -61,8 +78,13 @@ def _publish(root: Path, client, cfg: dict, entry: dict, dry_run: bool, commit: 
             _record_duplicate(root, entry, duplicate, commit, log)
             return True
     container = entry.get("container_id")
-    if container and not _container_usable(client, container):
-        container = None
+    if container:
+        status = _container_status(client, container, log)
+        if status == "PUBLISHED":
+            # Already posted; only the media id commit was lost. Never create or publish another one.
+            raise _AlreadyPublished()
+        if not _container_usable(status, container, log):
+            container = None
     if not container:
         container = client.create_reel_container(entry["asset_url"], entry["caption"])
         if not dry_run:
@@ -86,6 +108,20 @@ def _publish(root: Path, client, cfg: dict, entry: dict, dry_run: bool, commit: 
     queue.save(root, "pending", entry)
     commit(f"queue: published {entry['id']}")
     return True
+
+
+def _needs_manual_check(root: Path, entry: dict, commit: Callable[[str], object],
+                        log: Callable[[str], None], dry_run: bool) -> int:
+    log(f"{entry['id']}: {MANUAL_CHECK_ERROR}")
+    if dry_run:
+        return 1
+    entry["last_error"] = MANUAL_CHECK_ERROR
+    try:
+        queue.move(root, entry, "pending", "failed")
+        commit(f"queue: needs a manual check: {entry['id']}")
+    except (PublishError, OSError) as exc:
+        log(f"error: could not record the manual-check state: {exc}")
+    return 1
 
 
 def _finalize(root: Path, entry: dict, delete_asset: Callable[[int], object],
@@ -149,6 +185,8 @@ def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], objec
             if not _publish(root, client, cfg, entry, dry_run, commit, now, log):
                 return 0
         _finalize(root, entry, delete_asset, commit, log)
+    except _AlreadyPublished:
+        return _needs_manual_check(root, entry, commit, log, dry_run)
     except TokenInvalid:
         log("error: Instagram rejected the access token. Generate a new one and update the IG_ACCESS_TOKEN secret.")
         return 1
