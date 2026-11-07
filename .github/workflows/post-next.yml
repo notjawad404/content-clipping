@@ -1,0 +1,43 @@
+name: post-next
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Create and process the container, but do not publish"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ig-post
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the only dependency (pyyaml)
+        run: python -m pip install --quiet pyyaml
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Post the next queued clip
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          GH_TOKEN: ${{ secrets.CLIPS_REPO_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            python -m clipper.publish.post_next --dry-run
+          else
+            python -m clipper.publish.post_next
+          fi
