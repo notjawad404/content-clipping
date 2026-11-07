@@ -24,7 +24,7 @@ class PostNowError(PublishError):
 def default_run(args: list[str]):
     try:
         return subprocess.run(args, cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=COMMAND_TIMEOUT_S)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
         raise PostNowError(f"could not run {args[0]}: {type(exc).__name__}") from None
 
 
@@ -32,6 +32,39 @@ def _ok(proc, what: str) -> str:
     if proc.returncode != 0:
         raise PostNowError(f"{what} failed: {(proc.stderr or proc.stdout).strip()}")
     return proc.stdout
+
+
+def _unreadable(exc: Exception) -> PostNowError:
+    return PostNowError(f"could not read the queue ({type(exc).__name__})")
+
+
+def _load_pending(root: Path) -> list[dict]:
+    try:
+        return queue.load_all(root, "pending")
+    except (ValueError, OSError) as exc:
+        raise _unreadable(exc) from None
+
+
+def _next_pending(root: Path) -> dict | None:
+    try:
+        return queue.next_pending(root)
+    except (ValueError, OSError) as exc:
+        raise _unreadable(exc) from None
+    except (KeyError, TypeError) as exc:
+        raise PostNowError(f"the queue contains an unexpected entry ({type(exc).__name__})") from None
+
+
+def _entry_file(root: Path, state: str, entry_id: str) -> dict | None:
+    path = queue.path_for(root, state, entry_id)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (ValueError, OSError) as exc:
+        raise _unreadable(exc) from None
+    if not isinstance(data, dict):
+        raise PostNowError(f"the queue contains an unexpected entry ({type(data).__name__})")
+    return data
 
 
 def _check_branch(run, branch: str) -> None:
@@ -48,6 +81,13 @@ def _check_gh(run) -> None:
 
 def _pull(run) -> None:
     _ok(run(["git", "pull", "--rebase", "--autostash"]), "git pull --rebase")
+
+
+def _pull_quietly(run) -> None:
+    try:
+        _pull(run)
+    except PostNowError:
+        pass
 
 
 def _run_ids(run) -> set[int]:
@@ -71,16 +111,34 @@ def _start_run(run, known: set[int], sleep: Callable[[float], None], clock: Call
         sleep(POLL_INTERVAL_S)
 
 
-def _watch(run, run_id: int) -> None:
-    if run(["gh", "run", "watch", str(run_id), "--exit-status"]).returncode == 0:
-        return
-    url = run(["gh", "run", "view", str(run_id), "--json", "url", "--jq", ".url"]).stdout.strip() or f"run {run_id}"
-    raise PostNowError(f"workflow run {run_id} did not succeed: {url}")
+def _watch(run, run_id: int) -> bool:
+    return run(["gh", "run", "watch", str(run_id), "--exit-status"]).returncode == 0
 
 
-def _posted(root: Path, entry_id: str) -> dict | None:
-    path = queue.path_for(root, "posted", entry_id)
-    return json.loads(path.read_text()) if path.exists() else None
+def _run_url(run, run_id: int) -> str:
+    return run(["gh", "run", "view", str(run_id), "--json", "url", "--jq", ".url"]).stdout.strip() or f"run {run_id}"
+
+
+def _settle(root: Path, run, run_id: int, entry_id: str, succeeded: bool) -> dict:
+    """Return the posted entry, or raise a PostNowError that says exactly what happened to it."""
+    posted = _entry_file(root, "posted", entry_id)
+    if posted is not None:
+        return posted
+    failed = _entry_file(root, "failed", entry_id)
+    if failed is not None:
+        err = str(failed.get("last_error") or "unknown").replace("\r", " ").replace("\n", " ")
+        if not succeeded:
+            raise PostNowError(
+                f"workflow run {run_id} did not succeed and {entry_id} was moved to failed/ (last_error: {err}); "
+                f"check the Instagram profile before re-queueing: {_run_url(run, run_id)}")
+        raise PostNowError(
+            f"workflow run {run_id} finished but {entry_id} was moved to failed/ (last_error: {err}); "
+            f"check the Instagram profile before re-queueing")
+    if not succeeded:
+        raise PostNowError(f"workflow run {run_id} did not succeed: {_run_url(run, run_id)}")
+    raise PostNowError(
+        f"workflow run {run_id} finished green but {entry_id} is still queued (the daily "
+        f"quota may have been reached, or the run found nothing to post); check the run log")
 
 
 def post_now(root: Path, branch: str, run, *, sleep: Callable[[float], None] = time.sleep,
@@ -89,32 +147,28 @@ def post_now(root: Path, branch: str, run, *, sleep: Callable[[float], None] = t
         _check_branch(run, branch)
         _check_gh(run)
         _pull(run)
-        pending = queue.load_all(root, "pending")
+        pending = _load_pending(root)
         if not pending:
             log("nothing to post: the queue is empty")
             return 0
         for _ in range(len(pending)):
-            entry = queue.next_pending(root)
+            entry = _next_pending(root)
             if entry is None:
                 break
             run_id = _start_run(run, _run_ids(run), sleep, clock)
             log(f"started workflow run {run_id} for {entry['id']}")
-            _watch(run, run_id)
-            _pull(run)
-            posted = _posted(root, entry["id"])
-            if posted is None:
-                raise PostNowError(
-                    f"workflow run {run_id} finished green but {entry['id']} is still queued (the daily "
-                    f"quota may have been reached, or the run found nothing to post); check the run log")
+            succeeded = _watch(run, run_id)
+            if succeeded:
+                _pull(run)
+            else:
+                _pull_quietly(run)
+            posted = _settle(root, run, run_id, entry["id"], succeeded)
             link = posted.get("permalink") or f"media id {posted.get('media_id')} (no link returned)"
             log(f"posted {entry['id']}: {link}")
-        log(f"done: {len(pending) - len(queue.load_all(root, 'pending'))} posted")
+        log(f"done: {len(pending) - len(_load_pending(root))} posted")
         return 0
-    except PostNowError as exc:
+    except PublishError as exc:
         log(f"error: {exc}")
-        return 1
-    except (ValueError, OSError) as exc:
-        log(f"error: could not read the queue ({type(exc).__name__})")
         return 1
 
 
