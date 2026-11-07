@@ -676,17 +676,25 @@ git commit -m "feat: five clips by default and a queue-and-post step in the clip
 
 This is run by the controller together with the owner, not by a subagent, because it posts real Reels. Do not start it until the owner has given a YouTube link and said to go.
 
-- [ ] **Step 1: Push the new code so a new session sees it**
+- [ ] **Step 0: Checklist before the owner pastes a link**
 
-Run `git push origin master` only after the owner confirms. The posting workflow is unchanged, so this does not affect the cron.
+  - On `master`, `gh auth status` succeeds, nothing is staged (`commit_queue` refuses to commit when files outside `queue/` are staged), and `uv run pytest -q` is green.
+  - `queue/pending/` is empty or missing, so a bare link takes the post-now path (otherwise the skill correctly defers to the cron).
+  - Use a video that has never been processed (nothing in `jobs/` for it). Re-running an already-posted video skips its clips as "already queued".
+  - Do not start within about 30 minutes of a cron slot (09:00, 13:00, 19:00 UTC); a cron run during `post-now` is safe but makes the run list noisy.
+  - The final-review fixes are committed (opt-out for posting, `post-now` in the background, missing `queue/pending/`, single-episode campaigns).
+
+- [ ] **Step 1: Push explicitly first**
+
+Local `master` is ahead of `origin/master`, and `clipper queue` pushes all of local `master`, so push beforehand and on purpose: `git push origin master`, only after the owner confirms. This is safe for the cron: the workflow file, `post_next.py` and everything it imports are unchanged, and the Actions job never uses `post_now.py` or `style.yaml`. (A new Claude session reads the local working tree, so pushing is not what makes the skill visible.)
 
 - [ ] **Step 2: Fresh-session test**
 
-The owner opens a NEW Claude Code session in this folder and pastes a link with no other words. Expected: Claude runs preflight (doctor, `gh auth status`, branch check), prepares, picks a campaign or none and says why, makes up to 5 clips, checks the frames, queues the passing ones, runs `post-now`, and ends with the Reel links and the Content Rewards reminder.
+The owner opens a NEW Claude Code session in this folder and pastes a link with no other words. Expected: Claude runs preflight (doctor, `gh auth status`, branch check), prepares, picks a campaign or none and says why, makes up to 5 clips, checks the frames, queues the passing ones, runs `post-now` in the background, and ends with the Reel links. Verify afterwards: `done: N posted` matches the number of clips queued; the files in `queue/posted/` and the Instagram profile match the reported links; the campaign was reported with its reason; nothing was left in `queue/pending/`.
 
 - [ ] **Step 3: Variant checks (owner's choice)**
 
-Optionally repeat with "only 2 clips" and with "schedule them" to confirm the count override and queue-only mode (the cron then posts at the next 09:00, 13:00 or 19:00 UTC slot).
+Run "only 2 clips" first, then "schedule them" (once scheduled clips are pending, the next bare link is deferred behind them, which is the expected behavior), and optionally "just make the clips, don't post". Before relying on schedule mode or deferral, confirm the cron has actually fired at least once (`gh run list --workflow post-next.yml --event schedule`); it was enabled at 19:01 UTC on 2026-11-07, after that day's 19:00 slot, so the first scheduled run is the 09:00 UTC slot.
 
 - [ ] **Step 4: Report**
 
