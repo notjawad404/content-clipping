@@ -27,3 +27,20 @@ def test_post_next_workflow_uses_the_light_entry_point_and_the_two_secrets():
     assert "python -m clipper.publish.post_next" in text
     assert "secrets.IG_ACCESS_TOKEN" in text and "secrets.CLIPS_REPO_TOKEN" in text
     assert "uv sync" not in text and "pip install ." not in text
+
+
+def test_post_next_workflow_wiring_of_secrets_and_dry_run():
+    doc = load()
+    steps = doc["jobs"]["post"]["steps"]
+    last = steps[-1]
+    assert last["env"]["IG_ACCESS_TOKEN"] == "${{ secrets.IG_ACCESS_TOKEN }}"
+    assert last["env"]["GH_TOKEN"] == "${{ secrets.CLIPS_REPO_TOKEN }}"
+    assert last["env"]["DRY_RUN"] == "${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}"
+    for step in steps[:-1]:
+        env_text = str(step.get("env", {}))
+        assert "secrets." not in env_text and "IG_ACCESS_TOKEN" not in env_text and "GH_TOKEN" not in env_text
+    script = last["run"]
+    assert 'if [ "$DRY_RUN" = "true" ]; then' in script
+    live_branch = script.split("else")[1]
+    assert "--dry-run" not in live_branch and "python -m clipper.publish.post_next" in live_branch
+    assert script.split("else")[0].count("--dry-run") == 1

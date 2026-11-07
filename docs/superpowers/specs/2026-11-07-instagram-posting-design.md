@@ -83,6 +83,7 @@ New package `clipper/publish/`, each module one job:
 - **`queue.py`** — load, save and move entries between `pending`, `posted`, `failed`; pick the next entry. Pure file operations, no network.
 - **`clips_repo.py`** — upload a file as a release asset in the clips repo, return `(asset_url, asset_id)`; delete by asset id. Uses the `gh` CLI locally and `GITHUB_TOKEN`/PAT in Actions. One release per `video_id` (tag `v-<video_id>`), created on demand.
 - **`instagram.py`** — thin Graph API client over `https://graph.facebook.com/<version>/`: `create_reel_container`, `container_status`, `publish`, `publishing_limit`, `permalink`. Takes token and user id as arguments. Knows nothing about GitHub or the queue. Maps API errors to typed exceptions: `QuotaExceeded`, `TokenInvalid`, `ProcessingFailed`, `ApiError`.
+- **`gitops.py`** — commits and pushes only `queue/`. With a `queue_branch` it first refuses to run unless that branch is checked out (the cron only reads the default branch, so queueing elsewhere would look successful but never post). A rejected push is retried once after `git pull --rebase --autostash`, so uncommitted edits to other tracked files do not block it.
 - **`post_next.py`** — orchestrator called by the workflow: choose entry, check quota, create container, poll, publish, record, clean up. Supports `--dry-run`.
 - **`cli.py`** — new subcommands `queue <video_id> [--only clip_01]` and `post-next [--dry-run]`.
 
@@ -90,6 +91,7 @@ New package `clipper/publish/`, each module one job:
 ```yaml
 clips_repo: <owner>/<clips-repo>
 graph_version: v26.0        # current as of the Unified Login docs (Oct 2026)
+queue_branch: master        # the branch the cron reads; `queue` and `post-next` refuse to commit on any other
 ig_account_id: "17841438716134897"   # vanguardvisionhub; not a secret
 max_attempts: 3
 poll_interval_s: 10
@@ -106,19 +108,19 @@ Cron times are not configurable at runtime (Actions requires literal cron in the
 
 ## 5. `post-next` algorithm
 
-1. Take the oldest entry in `queue/pending/`. If none, exit 0 ("nothing to post").
+1. Take the oldest entry in `queue/pending/`. If none, exit 0 ("nothing to post"). If the same id already exists in `queue/posted/` or `queue/failed/`, the pending file is a stale duplicate (for example a stale branch was merged): delete only the pending file, commit, exit 0; the next run continues with the next entry.
 2. If the entry has a `media_id`, a previous run published it but did not finish cleanup: skip to step 8.
-3. `GET /<ig-account-id>/content_publishing_limit`. If used ≥ total, exit 0 with a notice. This is not a failure and does not count as an attempt.
-3.5. If the entry has a `container_id` from an earlier attempt (a retry), list the account's 5 most recent media (`GET /<ig-account-id>/media?limit=5&fields=caption,timestamp`). If one has an identical caption and was created within the last 24 hours, record it as the published media (`media_id`, `permalink`), commit, and skip to step 8: the earlier run published but could not commit. A dry run skips this check.
-4. If the entry has a `container_id` from an earlier attempt, reuse it only if its status is not `ERROR`/`EXPIRED`; otherwise create a new one.
+3. `GET /<ig-account-id>/content_publishing_limit`. If used ≥ total, exit 0 with a notice. This is not a failure and does not count as an attempt. Any other error from this call (outage, wrong account id, permissions) is logged, leaves the entry untouched and exits non-zero without counting an attempt.
+3.5. If the entry has a `container_id` from an earlier attempt (a retry), list the account's 5 most recent media (`GET /<ig-account-id>/media?limit=5&fields=caption,timestamp`). If one has an identical caption and was created within the last 24 hours, record it as the published media (`media_id`, `permalink`), commit, and skip to step 8: the earlier run published but could not commit. A dry run skips this check. An error from this early check is handled like an error from step 3 (no attempt counted).
+4. If the entry has a `container_id` from an earlier attempt, reuse it only if its status is `IN_PROGRESS` or `FINISHED`; otherwise create a new one and log why the old one was discarded. If its status is `PUBLISHED` (and step 3.5 found no match), the clip is already live and only the `media_id` commit was lost: create and publish nothing, move the entry to `queue/failed/` without counting an attempt with `last_error="container already PUBLISHED; media id unknown, check the Instagram profile"`, commit (`queue: needs a manual check: <id>`), keep the release asset and exit non-zero.
 5. `POST /<ig-account-id>/media` with `media_type=REELS`, `video_url=<asset_url>`, `caption=<caption>`, `share_to_feed=true`. Save `container_id` to the entry and commit it before continuing.
-6. Poll `GET /<container_id>?fields=status_code` every `poll_interval_s` until `FINISHED`. `ERROR`/`EXPIRED` or `poll_timeout_s` exceeded → failure.
+6. Poll `GET /<container_id>?fields=status_code,status` every `poll_interval_s` until `FINISHED`. `ERROR`/`EXPIRED` or `poll_timeout_s` exceeded → failure; the `status` text, when present, is included in the error (`container ERROR: <status>`).
 7. On a retry, repeat the step 3.5 check once more (a post may have appeared while the container processed) and record a match instead of publishing. Otherwise `POST /<ig-account-id>/media_publish?creation_id=<container_id>`. Save `media_id` to the entry immediately and commit. Fetch `permalink`.
 8. Move the entry to `queue/posted/`, delete the release asset, commit.
 
 Failure handling:
-- A failure at steps 5–7 increments `attempts`, records `last_error`, leaves the entry in `pending`, and exits non-zero so GitHub emails a failure notice. At `max_attempts` the entry moves to `queue/failed/`.
-- `TokenInvalid` exits non-zero without incrementing `attempts` (the clip is fine; the credential is not).
+- Only failures at steps 5–7 (create, poll, publish, and the step 7 duplicate check) count against the clip. A failure at steps 5–7 increments `attempts`, records `last_error`, leaves the entry in `pending`, and exits non-zero so GitHub emails a failure notice. At `max_attempts` the entry moves to `queue/failed/`.
+- `TokenInvalid` exits non-zero without incrementing `attempts` (the clip is fine; the credential is not). The log line includes Graph's message, since code 190 can mean expired or unparseable.
 - The double-post guard is step 2: `media_id` is committed immediately after publish, before any other work. If that commit itself fails, the next run sees no `media_id` and could post the clip again. To narrow that window, on a retry step 3.5 checks the account's recent media before any container is reused or created (so a published container is never waited on), and step 7 checks once more before publishing; a match with an identical caption created within the last 24 hours is recorded as the published media instead of publishing. This reduces but cannot fully remove the double-post risk; it is a known limitation.
 
 Secrets are never printed; captions are not logged beyond the first 40 characters.

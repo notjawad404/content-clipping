@@ -47,6 +47,7 @@ uv run clipper queue <video_id> [--only clip_01]   # upload rendered clips, add 
 uv run clipper post-next --dry-run                 # needs IG_ACCESS_TOKEN in the environment; never publishes
 ```
 
-The `post-next` workflow posts one clip per run (manual run: Actions → post-next → Run workflow; keep **dry run** on to test).
+The `post-next` workflow posts one clip per run (manual run: Actions → post-next → Run workflow). Dry run is checked by default; unchecking it, like any scheduled run, publishes live.
+Run `clipper queue` on the `master` branch (the `queue_branch` setting in `config/publish.yaml`): the workflow only reads that branch, so the command refuses to commit anywhere else.
 Queue folders: `queue/pending/`, `queue/posted/` (with the Instagram permalink) and `queue/failed/`.
 If a run reports that the token was rejected, generate a new one in the Meta App Dashboard (Use cases → Manage messaging & content on Instagram → Customize → API setup with Unified login → Generate token) and update the `IG_ACCESS_TOKEN` secret.
