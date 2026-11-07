@@ -337,3 +337,15 @@ def test_a_queue_error_from_a_queue_helper_stops_with_one_line(tmp_path, monkeyp
     code, logs, _ = go(tmp_path, fake)
     assert code == 1 and logs[-1] == "error: bad"
     assert fake.triggered() == []
+
+
+def test_default_logger_flushes_each_line(monkeypatch):
+    calls = []
+    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: calls.append((args, kwargs)))
+    post_now_mod._log("hello")
+    assert calls == [(("hello",), {"flush": True})]
+
+
+def test_post_now_defaults_to_the_flushing_logger():
+    import inspect
+    assert inspect.signature(post_now).parameters["log"].default is post_now_mod._log

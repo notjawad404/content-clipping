@@ -141,8 +141,12 @@ def _settle(root: Path, run, run_id: int, entry_id: str, succeeded: bool) -> dic
         f"quota may have been reached, or the run found nothing to post); check the run log")
 
 
+def _log(message: str) -> None:
+    print(message, flush=True)
+
+
 def post_now(root: Path, branch: str, run, *, sleep: Callable[[float], None] = time.sleep,
-             clock: Callable[[], float] = time.monotonic, log: Callable[[str], None] = print) -> int:
+             clock: Callable[[], float] = time.monotonic, log: Callable[[str], None] = _log) -> int:
     try:
         _check_branch(run, branch)
         _check_gh(run)

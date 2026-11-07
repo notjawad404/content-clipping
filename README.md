@@ -19,7 +19,7 @@ In Claude Code, in this folder, paste a YouTube link:
 
 By default Claude makes up to 5 clips and posts every clip that passes to Instagram, then lists the Reel links. If older clips are already waiting in the queue, new clips are queued behind them and posted by the cron instead of immediately. Add plain-word changes: a count ("only 3", "10 clips"), "schedule them" or "spread them through the day" (queue only; the cron posts 3 a day at 09:00, 13:00 and 19:00 UTC), "campaign `<name>`" (otherwise Claude picks one from the video only on a clear match), "under 30 seconds", "no zooms", "blue captions", "review first". Clips have no sound effects.
 
-Posting needs `gh auth login` and the `master` branch checked out. If posting stops with an error, run `uv run clipper post-now` to continue from the queue.
+Posting needs `gh auth login` and the `master` branch checked out. If posting stops with an error, run `uv run clipper post-now` to continue from the queue (it also posts clips from other videos that are waiting in the queue).
 
 Clips land in `output/<video_id>/`: `clip_XX.mp4`, `clip_XX_post.md` (captions per platform) and `summary.md`.
 
