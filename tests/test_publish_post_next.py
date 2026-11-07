@@ -4,7 +4,7 @@ from clipper.publish import post_next as post_next_module, queue
 from clipper.publish.clips_repo import RepoError
 from clipper.publish.config import PublishConfigError
 from clipper.publish.gitops import GitError
-from clipper.publish.instagram import ApiError, ProcessingFailed, QuotaExceeded, TokenInvalid
+from clipper.publish.instagram import ApiError, InstagramClient, ProcessingFailed, QuotaExceeded, TokenInvalid
 from clipper.publish.post_next import post_next
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=timezone.utc)
@@ -508,3 +508,64 @@ def test_post_wait_duplicate_check_error_still_counts_an_attempt(tmp_path):
     code, _, _ = run(tmp_path, client)
     assert code == 1 and "publish" not in client.calls
     assert queue.load_all(tmp_path, "pending")[0]["attempts"] == 1
+
+
+def test_container_error_reason_reaches_the_committed_last_error(tmp_path):
+    """End to end through the real client: the Graph status text lands in last_error."""
+    setup(tmp_path)
+
+    def http(method, url, params):
+        if url.endswith("/content_publishing_limit"):
+            return {"data": [{"quota_usage": 0, "config": {"quota_total": 100}}]}
+        if url.endswith("/1784/media"):
+            return {"id": "c-new"}
+        if url.endswith("/c-new"):
+            return {"status_code": "ERROR", "status": "Error: cannot fetch the video URL"}
+        raise AssertionError(url)
+
+    client = InstagramClient("SECRET-TOKEN", "1784", "v26.0", http=http, sleep=lambda s: None)
+    code, _, _ = run(tmp_path, client)
+    pending = queue.load_all(tmp_path, "pending")[0]
+    assert code == 1 and pending["last_error"] == "container ERROR: Error: cannot fetch the video URL"
+    assert "SECRET-TOKEN" not in str(pending)
+
+
+def test_token_rejection_log_includes_graph_message_but_never_the_token(tmp_path):
+    setup(tmp_path)
+    client = FakeClient()
+    client.errors["limit"] = TokenInvalid("Cannot parse access token")
+    code, _, logs = run_logged(tmp_path, client)
+    assert code == 1
+    assert logs[-1] == ("error: Instagram rejected the access token (Cannot parse access token). "
+                        "Generate a new one and update the IG_ACCESS_TOKEN secret.")
+
+
+def test_duplicate_caption_match_ignores_surrounding_whitespace_and_line_endings(tmp_path):
+    setup(tmp_path, container_id="c-old", caption="Line one\nLine two #tag\n")
+    recent = [{"id": "m-9", "caption": "Line one\r\nLine two #tag", "timestamp": "2026-11-07T11:00:00+0000"}]
+    client = FakeClient(status="FINISHED", recent=recent)
+    assert run(tmp_path, client)[0] == 0
+    assert "publish" not in client.calls
+    assert queue.load_all(tmp_path, "posted")[0]["media_id"] == "m-9"
+
+
+def test_duplicate_caption_match_when_graph_returns_the_trailing_newline(tmp_path):
+    setup(tmp_path, container_id="c-old", caption="Great clip #podcast")
+    recent = [{"id": "m-9", "caption": "  Great clip #podcast\n", "timestamp": "2026-11-07T11:00:00+0000"}]
+    client = FakeClient(status="FINISHED", recent=recent)
+    assert run(tmp_path, client)[0] == 0 and "publish" not in client.calls
+
+
+def test_a_genuinely_different_caption_is_not_a_duplicate(tmp_path):
+    setup(tmp_path, container_id="c-old")
+    recent = [{"id": "m-9", "caption": CAPTION + " extra", "timestamp": "2026-11-07T11:00:00+0000"}]
+    client = FakeClient(status="FINISHED", recent=recent)
+    assert run(tmp_path, client)[0] == 0
+    assert "publish" in client.calls and queue.load_all(tmp_path, "posted")[0]["media_id"] == "m-1"
+
+
+def test_recent_duplicate_tolerates_a_missing_caption(tmp_path):
+    setup(tmp_path, container_id="c-old")
+    recent = [{"id": "m-9", "timestamp": "2026-11-07T11:00:00+0000"}]
+    client = FakeClient(status="FINISHED", recent=recent)
+    assert run(tmp_path, client)[0] == 0 and "publish" in client.calls

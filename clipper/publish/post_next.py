@@ -58,9 +58,14 @@ def _container_usable(status: str | None, container_id: str, log: Callable[[str]
     return False
 
 
+def _normalized(caption) -> str:
+    return str(caption or "").replace("\r\n", "\n").strip()
+
+
 def _recent_duplicate(client, caption: str, now: datetime) -> dict | None:
+    wanted = _normalized(caption)
     for item in client.recent_media(5):
-        if item.get("caption") != caption:
+        if _normalized(item.get("caption")) != wanted:
             continue
         try:
             created = datetime.strptime(item["timestamp"], "%Y-%m-%dT%H:%M:%S%z")
@@ -224,8 +229,9 @@ def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], objec
         return 1
     except _AlreadyPublished:
         return _needs_manual_check(root, entry, commit, log, dry_run)
-    except TokenInvalid:
-        log("error: Instagram rejected the access token. Generate a new one and update the IG_ACCESS_TOKEN secret.")
+    except TokenInvalid as exc:
+        log(f"error: Instagram rejected the access token ({exc}). "
+            "Generate a new one and update the IG_ACCESS_TOKEN secret.")
         return 1
     except QuotaExceeded:
         log("publishing quota reached; will retry on the next run")

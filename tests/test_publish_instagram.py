@@ -104,6 +104,26 @@ def test_wait_until_finished_raises_on_error_status():
         client(FakeHttp({"status_code": "ERROR"})).wait_until_finished("999", 10, 300)
 
 
+def test_container_status_requests_the_status_text_and_returns_the_code():
+    http = FakeHttp({"status_code": "ERROR", "status": "Error: could not fetch the video"})
+    assert client(http).container_status("999") == "ERROR"
+    assert http.calls[0][2]["fields"] == "status_code,status"
+
+
+def test_processing_failure_includes_the_status_text():
+    http = FakeHttp({"status_code": "ERROR", "status": "Error: could not fetch the video"})
+    with pytest.raises(ProcessingFailed) as caught:
+        client(http).wait_until_finished("999", 10, 300)
+    assert str(caught.value) == "container ERROR: Error: could not fetch the video"
+    assert TOKEN not in str(caught.value)
+
+
+def test_processing_failure_without_status_text_is_just_the_code():
+    with pytest.raises(ProcessingFailed) as caught:
+        client(FakeHttp({"status_code": "EXPIRED"})).wait_until_finished("999", 10, 300)
+    assert str(caught.value) == "container EXPIRED"
+
+
 def test_wait_until_finished_times_out():
     http = FakeHttp(*[{"status_code": "IN_PROGRESS"}] * 10)
     with pytest.raises(ProcessingFailed, match="timed out"):

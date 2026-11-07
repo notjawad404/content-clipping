@@ -116,17 +116,23 @@ class InstagramClient:
                            "share_to_feed": "true"})
         return _field(data, "id")
 
+    def _container_info(self, container_id: str) -> tuple[str, str | None]:
+        """(status_code, status text); the text is Instagram's reason for an ERROR, when it gives one."""
+        data = self._call("GET", container_id, {"fields": "status_code,status"})
+        text = data.get("status") if isinstance(data, dict) else None
+        return _field(data, "status_code"), (str(text) if text else None)
+
     def container_status(self, container_id: str) -> str:
-        return _field(self._call("GET", container_id, {"fields": "status_code"}), "status_code")
+        return self._container_info(container_id)[0]
 
     def wait_until_finished(self, container_id: str, interval: float, timeout: float) -> None:
         deadline = self._clock() + timeout
         while True:
-            status = self.container_status(container_id)
+            status, text = self._container_info(container_id)
             if status == "FINISHED":
                 return
             if status in ("ERROR", "EXPIRED"):
-                raise ProcessingFailed(f"container {status}")
+                raise ProcessingFailed(f"container {status}: {text}" if text else f"container {status}")
             if self._clock() >= deadline:
                 raise ProcessingFailed(f"timed out after {timeout:g}s (last status {status})")
             self._sleep(interval)
