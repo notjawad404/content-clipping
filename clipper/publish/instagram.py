@@ -1,6 +1,7 @@
 """Thin Instagram Graph API client (Instagram API with Unified Login). Knows nothing about GitHub or the queue."""
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -61,8 +62,8 @@ def urllib_http(method: str, url: str, params: dict) -> dict:
         except ValueError:
             payload = {}
         raise HttpFailure(exc.code, payload) from None
-    except urllib.error.URLError as exc:
-        raise ApiError(f"network error: {exc.reason}") from None
+    except (OSError, http.client.HTTPException, ValueError) as exc:
+        raise ApiError(f"network error: {type(exc).__name__}") from None
 
 
 def _map_error(payload: dict, status: int) -> IgError:

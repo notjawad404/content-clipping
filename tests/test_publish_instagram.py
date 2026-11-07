@@ -165,3 +165,30 @@ def test_urllib_http_maps_http_errors(monkeypatch):
     with pytest.raises(HttpFailure) as caught:
         urllib_http("GET", "https://x/y", {"a": "1"})
     assert caught.value.status == 400 and caught.value.payload["error"]["code"] == 190
+
+
+class ReadFailsResponse(FakeResponse):
+    def read(self):
+        raise TimeoutError("read timed out")
+
+
+def test_urllib_http_read_timeout_becomes_api_error(monkeypatch):
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: ReadFailsResponse(b""))
+    with pytest.raises(ApiError, match="TimeoutError"):
+        urllib_http("GET", "https://x/y", {"a": "1"})
+
+
+def test_urllib_http_malformed_success_body_becomes_api_error(monkeypatch):
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout: FakeResponse(b"not json"))
+    with pytest.raises(ApiError):
+        urllib_http("GET", "https://x/y", {"a": "1"})
+
+
+def test_urllib_http_network_error_hides_its_text(monkeypatch):
+    def fake_urlopen(req, timeout):
+        raise urllib.error.URLError("dns failure")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(ApiError) as caught:
+        urllib_http("GET", "https://x/y", {"a": "1"})
+    assert "dns failure" not in str(caught.value)
