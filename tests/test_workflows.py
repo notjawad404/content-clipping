@@ -48,4 +48,4 @@ def test_post_next_workflow_wiring_of_secrets_and_dry_run():
 
 def test_post_next_is_scheduled_three_times_a_day():
     schedule = triggers(load())["schedule"]
-    assert schedule == [{"cron": "37 17 * * *"}, {"cron": "13 0 * * *"}]
+    assert schedule == [{"cron": "41 19 * * *"}, {"cron": "41 1 * * *"}]
