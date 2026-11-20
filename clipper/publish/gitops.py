@@ -16,7 +16,7 @@ class GitError(PublishError):
 def default_run(args: list[str], cwd: Path):
     try:
         return subprocess.run(
-            args, cwd=cwd, capture_output=True, text=True, timeout=120,
+            args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         )
     except (OSError, subprocess.TimeoutExpired) as exc:

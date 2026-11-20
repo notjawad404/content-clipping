@@ -262,6 +262,8 @@ def test_unexpected_publish_error_is_reported_without_an_attempt(tmp_path):
 
 def test_main_requires_the_token(monkeypatch, capsys):
     monkeypatch.delenv("IG_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(post_next_module, "load_publish_config",
+                        lambda: {"ig_account_id": "1", "graph_version": "v26.0", "youtube": False})
     assert post_next_module.main([]) == 2
     assert "IG_ACCESS_TOKEN" in capsys.readouterr().out
 

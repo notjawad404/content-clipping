@@ -43,7 +43,7 @@ def node_major(version_output: str) -> int | None:
 
 def _output(cmd: list[str]) -> str:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=30).stdout
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30).stdout
     except (OSError, subprocess.TimeoutExpired):
         return ""
 
@@ -56,18 +56,24 @@ def _dist_version(name: str) -> str | None:
 
 
 def run_doctor() -> list[Check]:
+    mac = sys.platform == "darwin"
+    ffmpeg_fix = "brew install ffmpeg-full" if mac else "winget install yt-dlp.FFmpeg (or any ffmpeg build with libass and libx264 on PATH)"
     checks = [Check("python", sys.version_info[:2] == (3, 12), sys.version.split()[0], "Run through `uv run` (Python 3.12)")]
-    checks.append(Check("ffmpeg-full", (FFMPEG_FULL_DIR / "ffmpeg").exists(), f"using {ffmpeg_dir()}", "brew install ffmpeg-full"))
+    if mac:
+        checks.append(Check("ffmpeg-full", (FFMPEG_FULL_DIR / "ffmpeg").exists(), f"using {ffmpeg_dir()}", ffmpeg_fix))
+    else:
+        checks.append(Check("ffmpeg", ffmpeg_dir() is not None, f"using {ffmpeg_dir()}", ffmpeg_fix))
     filters = listed_names(_output([ffmpeg_bin(), "-hide_banner", "-filters"]))
-    checks.append(Check("ffmpeg libass", {"ass", "subtitles"} <= filters, "ass/subtitles filters", "brew install ffmpeg-full"))
+    checks.append(Check("ffmpeg libass", {"ass", "subtitles"} <= filters, "ass/subtitles filters", ffmpeg_fix))
     encoders = listed_names(_output([ffmpeg_bin(), "-hide_banner", "-encoders"]))
-    checks.append(Check("ffmpeg libx264", "libx264" in encoders, "libx264 encoder", "brew install ffmpeg-full"))
+    checks.append(Check("ffmpeg libx264", "libx264" in encoders, "libx264 encoder", ffmpeg_fix))
     major = node_major(_output(["node", "--version"]))
-    checks.append(Check("node (yt-dlp JS runtime)", bool(major and major >= 20), f"node v{major}", "brew install node@22"))
+    checks.append(Check("node (yt-dlp JS runtime)", bool(major and major >= 20), f"node v{major}",
+                        "brew install node@22" if mac else "winget install OpenJS.NodeJS.LTS"))
     for dist in ("yt-dlp", "yt-dlp-ejs"):
         version = _dist_version(dist)
         checks.append(Check(dist, version is not None, f"{dist} {version}", "uv sync"))
-    for module in ("parakeet_mlx", "mediapipe", "scenedetect", "cv2", "pysubs2"):
+    for module in ("parakeet_mlx" if mac else "faster_whisper", "mediapipe", "scenedetect", "cv2", "pysubs2"):
         checks.append(Check(module, importlib.util.find_spec(module) is not None, f"import {module}", "uv sync"))
     for label, path in (("face model", FACE_MODEL_PATH), ("caption font", FONT_PATH), ("whoosh sfx", WHOOSH_PATH)):
         checks.append(Check(label, path.exists(), str(path.relative_to(PROJECT_ROOT)), SETUP_ASSETS))

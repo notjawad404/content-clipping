@@ -85,13 +85,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 def _read_fingerprint(path: Path) -> dict | None:
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
 
 
 def _write_fingerprint(path: Path, data: dict) -> None:
-    path.write_text(json.dumps(data))
+    path.write_text(json.dumps(data), encoding="utf-8")
 
 
 def _produce_one(job: Job, clip: dict, cfg: dict, info: dict, meta: dict, words: list[dict], force: set[str]) -> list[str]:
@@ -107,9 +107,10 @@ def _produce_one(job: Job, clip: dict, cfg: dict, info: dict, meta: dict, words:
             fetch.fetch_section(job, info["url"], clip, meta["duration"], info.get("cookies_browser"))
         _write_fingerprint(src_print, src_fp)
     crops = job.crops_dir / f"{cid}.json"
-    if "reframe" in force or not is_fresh(crops, [src]):
+    mode = cfg.get("framing", {}).get("mode", "auto")
+    if "reframe" in force or not is_fresh(crops, [src]) or (_read_fingerprint(crops) or {}).get("mode", "auto") != mode:
         with timed(job, f"reframe_{cid}"):
-            reframe.run(job, clip, words, meta["duration"])
+            reframe.run(job, clip, words, meta["duration"], mode=mode)
     out = job.out / f"{cid}.mp4"
     out_print = job.render_dir / f"{cid}.json"
     cfg_hash = hashlib.sha256(json.dumps(cfg, sort_keys=True, default=str).encode()).hexdigest()
@@ -119,7 +120,7 @@ def _produce_one(job: Job, clip: dict, cfg: dict, info: dict, meta: dict, words:
         with timed(job, f"render_{cid}"):
             render.render_clip(job, clip, cfg, words, meta["duration"])
         _write_fingerprint(out_print, render_print)
-    (job.out / f"{cid}_post.md").write_text(package.post_markdown(clip))
+    (job.out / f"{cid}_post.md").write_text(package.post_markdown(clip), encoding="utf-8")
     return [str(p) for p in package.extract_frames(out, clip["duration"], job.frames_dir)]
 
 
@@ -147,7 +148,7 @@ def cmd_produce(args: argparse.Namespace) -> int:
             results[clip["id"]] = None
             attempted_ok = True
         except Exception as exc:  # one broken clip must never stop the rest
-            (job.logs_dir / f"{clip['id']}_error.log").write_text(traceback.format_exc())
+            (job.logs_dir / f"{clip['id']}_error.log").write_text(traceback.format_exc(), encoding="utf-8")
             lines = str(exc).splitlines()
             first_line = lines[0] if lines else ""
             if isinstance(exc, FetchError) and "bot check" in str(exc).lower():
@@ -159,7 +160,7 @@ def cmd_produce(args: argparse.Namespace) -> int:
                 results[clip["id"]] = f"{type(exc).__name__}: {first_line}"
     job.write_json(job.results, results)
     timings = job.read_json(job.timings) if job.timings.exists() else {}
-    (job.out / "summary.md").write_text(package.summary_markdown(meta, resolved, results, timings))
+    (job.out / "summary.md").write_text(package.summary_markdown(meta, resolved, results, timings), encoding="utf-8")
     print(json.dumps({"output": str(job.out), "results": results, "qa_frames": frames}, indent=2))
     return 0 if attempted_ok else 1
 

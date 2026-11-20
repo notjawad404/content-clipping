@@ -38,8 +38,18 @@ def test_missing_required_key_names_the_key(tmp_path):
 def test_the_shipped_config_is_valid():
     cfg = load_publish_config()
     assert cfg["clips_repo"] == "hammadalive7/content-clips"
-    assert cfg["ig_account_id"] == "17841438716134897"
+    assert cfg["ig_account_id"] is None and cfg["youtube"] is True
     assert cfg["queue_branch"] == "master"
+
+
+def test_instagram_is_optional_when_youtube_is_enabled(tmp_path):
+    cfg = load_publish_config(write(tmp_path, "clips_repo: me/clips\nyoutube: true\n"))
+    assert cfg["ig_account_id"] is None
+
+
+def test_no_platform_enabled_is_an_error(tmp_path):
+    with pytest.raises(PublishConfigError, match="no platform enabled"):
+        load_publish_config(write(tmp_path, "clips_repo: me/clips\nyoutube: false\n"))
 
 
 def test_malformed_yaml_raises_config_error(tmp_path):

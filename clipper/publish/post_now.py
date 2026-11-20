@@ -23,7 +23,7 @@ class PostNowError(PublishError):
 
 def default_run(args: list[str]):
     try:
-        return subprocess.run(args, cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=COMMAND_TIMEOUT_S)
+        return subprocess.run(args, cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=COMMAND_TIMEOUT_S)
     except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
         raise PostNowError(f"could not run {args[0]}: {type(exc).__name__}") from None
 
@@ -59,7 +59,7 @@ def _entry_file(root: Path, state: str, entry_id: str) -> dict | None:
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (ValueError, OSError) as exc:
         raise _unreadable(exc) from None
     if not isinstance(data, dict):
@@ -167,7 +167,9 @@ def post_now(root: Path, branch: str, run, *, sleep: Callable[[float], None] = t
             else:
                 _pull_quietly(run)
             posted = _settle(root, run, run_id, entry["id"], succeeded)
-            link = posted.get("permalink") or f"media id {posted.get('media_id')} (no link returned)"
+            youtube_url = (posted.get("youtube") or {}).get("url")
+            link = (posted.get("permalink") or (posted.get("media_id") and f"media id {posted['media_id']} (no link returned)")
+                    or youtube_url or "no link returned")
             log(f"posted {entry['id']}: {link}")
         log(f"done: {len(pending) - len(_load_pending(root))} posted")
         return 0

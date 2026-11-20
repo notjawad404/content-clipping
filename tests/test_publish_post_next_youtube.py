@@ -199,3 +199,31 @@ def test_poster_download_error_is_a_download_error():
     poster, _ = poster_with(boom)
     with pytest.raises(DownloadError):
         poster.post({"caption": "c", "asset_url": "u"})
+
+
+def test_youtube_only_posts_and_finalizes_without_instagram(tmp_path):
+    setup(tmp_path)
+    poster = FakePoster()
+    code, deleted, commits, logs = run(tmp_path, None, poster)
+    assert code == 0 and poster.posted == ["vid_clip_01"]
+    posted = queue.load_all(tmp_path, "posted")[0]
+    assert posted["media_id"] is None and posted["youtube"]["video_id"] == "yt1"
+    assert deleted == [7] and "queue: posted vid_clip_01" in commits
+
+
+def test_youtube_only_moves_to_failed_after_the_last_attempt(tmp_path):
+    setup(tmp_path, youtube={"video_id": None, "url": None, "attempts": 2, "last_error": None})
+    poster = FakePoster()
+    poster.error = ApiError("boom")
+    code, deleted, _, _ = run(tmp_path, None, poster)
+    assert code == 1 and deleted == []
+    assert queue.load_all(tmp_path, "pending") == []
+    assert queue.load_all(tmp_path, "failed")[0]["youtube"]["attempts"] == 3
+
+
+def test_youtube_only_dry_run_changes_nothing(tmp_path):
+    setup(tmp_path)
+    poster = FakePoster()
+    code, deleted, commits, _ = run(tmp_path, None, poster, dry_run=True)
+    assert code == 0 and poster.checked == 1 and poster.posted == []
+    assert deleted == [] and commits == [] and len(queue.load_all(tmp_path, "pending")) == 1

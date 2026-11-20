@@ -42,14 +42,14 @@ def path_for(root: Path, state: str, entry_id: str) -> Path:
 def save(root: Path, state: str, entry: dict) -> None:
     directory = _dir(root, state)
     directory.mkdir(parents=True, exist_ok=True)
-    path_for(root, state, entry["id"]).write_text(json.dumps(entry, indent=2) + "\n")
+    path_for(root, state, entry["id"]).write_text(json.dumps(entry, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def load_all(root: Path, state: str) -> list[dict]:
     directory = _dir(root, state)
     if not directory.exists():
         return []
-    return [json.loads(p.read_text()) for p in sorted(directory.glob("*.json"))]
+    return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(directory.glob("*.json"))]
 
 
 def exists_anywhere(root: Path, entry_id: str) -> bool:

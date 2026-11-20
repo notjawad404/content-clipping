@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -58,7 +59,8 @@ def test_encode_args_quality_and_fast_modes():
     assert args[args.index("-c:v") + 1] == "libx264" and args[args.index("-crf") + 1] == "18"
     assert "+faststart" in args
     cfg["render"]["fast"] = True
-    assert "h264_videotoolbox" in encode_args(cfg)
+    fast = "h264_videotoolbox" if sys.platform == "darwin" else "veryfast"
+    assert fast in encode_args(cfg)
 
 
 def test_failed_final_pass_leaves_no_output_file(tmp_path, monkeypatch):

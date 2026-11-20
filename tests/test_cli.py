@@ -33,7 +33,7 @@ def test_produce_isolates_a_failing_clip(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cli, "job_for", lambda video_id: job)
     monkeypatch.setattr(cli.fetch, "fetch_section", fake_fetch)
-    monkeypatch.setattr(cli.reframe, "run", lambda j, c, w, d: (j.crops_dir / f"{c['id']}.json").write_text("{}"))
+    monkeypatch.setattr(cli.reframe, "run", lambda j, c, w, d, **kw: (j.crops_dir / f"{c['id']}.json").write_text("{}"))
     monkeypatch.setattr(cli.render, "render_clip", lambda j, c, cfg, w, d: (j.out / f"{c['id']}.mp4").write_bytes(b"v"))
     monkeypatch.setattr(cli.package, "extract_frames", lambda video, duration, out_dir: [])
 
@@ -81,7 +81,7 @@ class Stages:
 
         monkeypatch.setattr(cli, "job_for", lambda video_id: job)
         monkeypatch.setattr(cli.fetch, "fetch_section", fake_fetch)
-        monkeypatch.setattr(cli.reframe, "run", lambda j, c, w, d: (j.crops_dir / f"{c['id']}.json").write_text("{}"))
+        monkeypatch.setattr(cli.reframe, "run", lambda j, c, w, d, **kw: (j.crops_dir / f"{c['id']}.json").write_text("{}"))
         monkeypatch.setattr(cli.render, "render_clip", fake_render)
         monkeypatch.setattr(cli.package, "extract_frames", lambda video, duration, out_dir: [])
 
@@ -362,3 +362,19 @@ def test_post_now_publish_errors_are_one_line_exit_2(monkeypatch, capsys):
     monkeypatch.setattr(cli.post_now_mod, "main", boom)
     assert cli.main(["post-now"]) == 2
     assert "error: config is broken" in capsys.readouterr().out
+
+
+def test_changing_the_framing_mode_reruns_reframe_with_that_mode(tmp_path, monkeypatch):
+    h = Stages(tmp_path, monkeypatch)
+    modes = []
+
+    def fake_reframe(j, c, w, d, mode="auto"):
+        modes.append(mode)
+        j.write_json(j.crops_dir / f"{c['id']}.json", {"mode": mode})
+
+    monkeypatch.setattr(cli.reframe, "run", fake_reframe)
+    assert cli.main(["produce", "vid"]) == 0
+    assert cli.main(["produce", "vid"]) == 0
+    (h.job.overrides).write_text("framing: {mode: fit}\n", encoding="utf-8")
+    assert cli.main(["produce", "vid"]) == 0
+    assert modes == ["auto", "fit"]

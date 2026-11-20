@@ -368,6 +368,26 @@ def _post_both(root: Path, client, cfg: dict, entry: dict, delete_asset: Callabl
     return code
 
 
+def _post_youtube_only(root: Path, entry: dict, cfg: dict, delete_asset: Callable[[int], object], poster,
+                       dry_run: bool, commit: Callable[[str], object], log: Callable[[str], None]) -> int:
+    entry.setdefault("youtube", queue.new_youtube_state())
+    try:
+        code = _youtube(root, entry, cfg, poster, dry_run, commit, log)
+        if dry_run:
+            return code
+        state = entry["youtube"]
+        if state["video_id"]:
+            _finalize(root, entry, delete_asset, commit, log)
+        elif state["attempts"] >= cfg["max_attempts"]:
+            queue.move(root, entry, "pending", "failed")
+            commit(f"queue: failed {entry['id']}")
+            log(f"{entry['id']}: YouTube ran out of attempts; entry is now failed")
+    except (PublishError, OSError) as exc:
+        log(f"error: {exc}")
+        return 1
+    return code
+
+
 def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], object], *, dry_run: bool = False,
               commit: Callable[[str], object] | None = None, now: datetime | None = None,
               log: Callable[[str], None] = print, youtube: YouTubePoster | None = None) -> int:
@@ -384,22 +404,29 @@ def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], objec
     if _is_stale_duplicate(root, entry):
         return _remove_stale_duplicate(root, entry, commit, log, dry_run)
     log(f"next: {entry['id']} ({_short(entry['caption'])})")
+    if client is None:
+        if youtube is None:
+            log("error: no platform configured")
+            return 1
+        return _post_youtube_only(root, entry, cfg, delete_asset, youtube, dry_run, commit, log)
     if youtube is not None:
         return _post_both(root, client, cfg, entry, delete_asset, youtube, dry_run, commit, now, log)
     return _instagram(root, client, cfg, entry, delete_asset, dry_run, commit, now, log)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="post-next", description="Post the oldest queued clip to Instagram")
-    parser.add_argument("--dry-run", action="store_true", help="create and process the container, do not publish")
+    parser = argparse.ArgumentParser(prog="post-next", description="Post the oldest queued clip")
+    parser.add_argument("--dry-run", action="store_true", help="check credentials and processing, do not publish")
     args = parser.parse_args(argv)
-    token = os.environ.get("IG_ACCESS_TOKEN")
-    if not token:
-        print("error: the IG_ACCESS_TOKEN environment variable is not set")
-        return 2
     try:
         cfg = load_publish_config()
-        client = InstagramClient(token, cfg["ig_account_id"], cfg["graph_version"])
+        client = None
+        if cfg.get("ig_account_id"):
+            token = os.environ.get("IG_ACCESS_TOKEN")
+            if not token:
+                print("error: the IG_ACCESS_TOKEN environment variable is not set")
+                return 2
+            client = InstagramClient(token, cfg["ig_account_id"], cfg["graph_version"])
         poster = None
         if cfg.get("youtube"):
             missing = [name for name in YT_ENV if not os.environ.get(name)]

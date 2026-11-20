@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
         print("error: set the YT_REFRESH_TOKEN environment variable")
         return 2
     try:
-        client = json.loads(Path(args.client).expanduser().read_text())["installed"]
+        client = json.loads(Path(args.client).expanduser().read_text(encoding="utf-8"))["installed"]
         video = args.video.read_bytes()
     except (OSError, ValueError, KeyError) as exc:
         print(f"error: {exc}")

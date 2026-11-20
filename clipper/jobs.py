@@ -86,10 +86,10 @@ class Job:
             d.mkdir(parents=True, exist_ok=True)
 
     def read_json(self, path: Path) -> Any:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def write_json(self, path: Path, data: Any) -> None:
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def job_for(video_id: str, jobs_dir: Path = JOBS_DIR, output_dir: Path = OUTPUT_DIR) -> Job:

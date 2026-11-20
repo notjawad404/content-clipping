@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     client_path = Path(args.client).expanduser()
     try:
-        client = json.loads(client_path.read_text())["installed"]
+        client = json.loads(client_path.read_text(encoding="utf-8"))["installed"]
     except (OSError, ValueError, KeyError) as exc:
         print(f"error: cannot read a Desktop client from {client_path}: {exc}")
         return 2

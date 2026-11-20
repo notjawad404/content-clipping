@@ -1,6 +1,6 @@
-# Instagram posting settings. None of these are secrets (the token is the IG_ACCESS_TOKEN Actions secret).
-clips_repo: hammadalive7/content-clips      # public repo whose Release assets Instagram fetches
-ig_account_id: "17841438716134897"          # vanguardvisionhub
+# Posting settings. None of these are secrets (tokens are Actions secrets).
+# Instagram is off: add ig_account_id: "<id>" and the IG_ACCESS_TOKEN secret to turn it back on.
+clips_repo: hammadalive7/content-clips      # public repo hosting the queued clip files
 graph_version: v26.0
 queue_branch: master                        # the branch the cron reads; queueing is refused anywhere else
 youtube: true                               # also post each clip to YouTube Shorts

@@ -17,7 +17,7 @@ class RepoError(PublishError):
 
 def default_run(args: list[str]):
     try:
-        return subprocess.run(args, capture_output=True, text=True)
+        return subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
     except OSError as exc:
         raise RepoError(f"could not run {args[0]}: {type(exc).__name__}") from None
 

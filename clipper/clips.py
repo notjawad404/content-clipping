@@ -24,7 +24,7 @@ class ClipError(Exception):
 
 
 def validate_doc(doc: dict) -> None:
-    schema = json.loads(SCHEMA_PATH.read_text())
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     try:
         jsonschema.validate(doc, schema)
     except jsonschema.ValidationError as exc:

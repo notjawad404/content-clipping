@@ -33,6 +33,9 @@ hook_text:
   size: 64
   margin_top: 300
 
+framing:
+  mode: auto      # auto: follow faces; fit: whole frame over a blurred fill (gameplay)
+
 zoom:
   enabled: true
   scale: 1.18

@@ -5,7 +5,8 @@ description = "Local podcast clipper driven by Claude Code"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "yt-dlp[default]>=2026.10.26",
-    "parakeet-mlx>=0.7.0",
+    "parakeet-mlx>=0.7.0; sys_platform == 'darwin'",
+    "faster-whisper>=1.1; sys_platform != 'darwin'",
     "scenedetect>=0.7.2",
     "opencv-contrib-python>=4.10",
     "mediapipe>=1.2.2",

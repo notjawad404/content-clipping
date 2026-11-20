@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from clipper.captions import build_ass, clean, group_words
@@ -105,7 +107,9 @@ def loudnorm_pass2(m: dict) -> str:
 
 def encode_args(cfg: dict) -> list[str]:
     r = cfg["render"]
-    if r["fast"]:
+    if r["fast"] and sys.platform != "darwin":
+        video = ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(r["crf"]), "-profile:v", "high"]
+    elif r["fast"]:
         video = ["-c:v", "h264_videotoolbox", "-q:v", "60", "-profile:v", "high"]
     else:
         video = ["-c:v", "libx264", "-preset", "medium", "-crf", str(r["crf"]), "-profile:v", "high"]
@@ -121,9 +125,9 @@ def _input_args(src: Path, offset: float, duration: float, use_sfx: bool) -> lis
 
 
 def _run(cmd: list[str], cwd: Path, log: Path) -> subprocess.CompletedProcess:
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text(f"$ {' '.join(cmd)}\n\n{proc.stderr}")
+    log.write_text(f"$ {' '.join(cmd)}\n\n{proc.stderr}", encoding="utf-8")
     if proc.returncode != 0:
         tail = "\n".join(proc.stderr.strip().splitlines()[-10:])
         raise RenderError(f"ffmpeg failed (exit {proc.returncode}), log: {log}\n{tail}")
@@ -132,8 +136,12 @@ def _run(cmd: list[str], cwd: Path, log: Path) -> subprocess.CompletedProcess:
 
 def _link_fonts(render_dir: Path) -> None:
     link = render_dir / "fonts"
-    if not link.exists():
-        os.symlink(FONTS_DIR, link)
+    if link.exists():
+        return
+    try:
+        os.symlink(FONTS_DIR, link, target_is_directory=True)
+    except OSError:  # Windows without Developer Mode cannot create symlinks
+        shutil.copytree(FONTS_DIR, link)
 
 
 def render_clip(job: Job, clip: dict, cfg: dict, words: list[dict], meta_duration: float | None) -> Path:

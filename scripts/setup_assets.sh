@@ -3,6 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FFMPEG="${CLIPPER_FFMPEG_DIR:-/opt/homebrew/opt/ffmpeg-full/bin}/ffmpeg"
+[ -x "$FFMPEG" ] || FFMPEG="$(command -v ffmpeg)"
 mkdir -p "$ROOT/assets/fonts" "$ROOT/assets/sfx" "$ROOT/models"
 
 FONT="$ROOT/assets/fonts/Montserrat-Black.ttf"

@@ -1,0 +1,5 @@
+# Gaming preset (gameplay, trailers, news and breakdown videos). Copy into jobs/<video_id>/overrides.yaml.
+framing: {mode: fit}             # keep the whole gameplay frame; never crop to a facecam
+captions: {y: 1400}              # below the 16:9 gameplay band (y 656..1264), clear of the HUD and minimap
+length: {min: 15, target_min: 20, target_max: 45, max: 60}
+min_score: 6.5

@@ -94,15 +94,17 @@ def to_clip_shots(shots: list[tuple[float, float]], offset: float, duration: flo
     return merge_short_shots(clip_shots)
 
 
-def run(job: Job, clip: dict, words: list[dict], meta_duration: float | None) -> Path:
+def run(job: Job, clip: dict, words: list[dict], meta_duration: float | None, mode: str = "auto") -> Path:
+    """mode "fit" keeps the whole frame in every shot (gameplay, screen recordings); "auto" follows faces."""
     src = job.src_dir / f"{clip['id']}.mp4"
     section_start, _ = section_window(clip["start"], clip["end"], meta_duration)
     offset = round(clip["start"] - section_start, 3)
     src_w, src_h, fps, _ = probe(src)
     shots = to_clip_shots(detect_shots(src), offset, clip["duration"])
-    samples = sample_faces(src, src_w, src_h, fps, t_offset=offset)
+    samples = [] if mode == "fit" else sample_faces(src, src_w, src_h, fps, t_offset=offset)
     ends = sentence_end_times(clip_words(words, clip))
     segments = plan_clip(shots, samples, src_w, src_h, ends)
     out = job.crops_dir / f"{clip['id']}.json"
-    job.write_json(out, {"clip_id": clip["id"], "src_w": src_w, "src_h": src_h, "offset": offset, "segments": segments})
+    job.write_json(out, {"clip_id": clip["id"], "src_w": src_w, "src_h": src_h, "offset": offset, "mode": mode,
+                         "segments": segments})
     return out
