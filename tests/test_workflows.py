@@ -34,7 +34,7 @@ def test_post_next_workflow_wiring_of_secrets_and_dry_run():
     steps = doc["jobs"]["post"]["steps"]
     last = steps[-1]
     assert last["env"]["IG_ACCESS_TOKEN"] == "${{ secrets.IG_ACCESS_TOKEN }}"
-    assert last["env"]["GH_TOKEN"] == "${{ secrets.CLIPS_REPO_TOKEN }}"
+    assert last["env"]["GH_TOKEN"] == "${{ secrets.CLIPS_REPO_TOKEN || github.token }}"
     assert last["env"]["DRY_RUN"] == "${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}"
     for step in steps[:-1]:
         env_text = str(step.get("env", {}))

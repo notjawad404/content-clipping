@@ -37,7 +37,7 @@ def test_missing_required_key_names_the_key(tmp_path):
 
 def test_the_shipped_config_is_valid():
     cfg = load_publish_config()
-    assert cfg["clips_repo"] == "hammadalive7/content-clips"
+    assert cfg["clips_repo"] == "notjawad404/content-clipping"
     assert cfg["ig_account_id"] is None and cfg["youtube"] is True
     assert cfg["queue_branch"] == "master"
 
