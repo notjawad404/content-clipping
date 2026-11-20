@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Create and process the container, but do not publish"
+        description: "Check credentials and the next queued clip, but do not publish"
         type: boolean
         default: true
 
