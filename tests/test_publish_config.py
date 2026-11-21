@@ -14,7 +14,7 @@ def test_defaults_are_applied(tmp_path):
     assert cfg == {"clips_repo": "me/clips", "ig_account_id": "123", "graph_version": "v26.0",
                    "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300,
                    "youtube": False, "youtube_privacy": "private", "tiktok": False, "tiktok_privacy": "SELF_ONLY",
-                   "tiktok_mode": "draft"}
+                   "tiktok_mode": "draft", "tiktok_keep_days": 7}
 
 
 def test_tiktok_settings_are_validated(tmp_path):

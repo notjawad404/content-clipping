@@ -526,6 +526,60 @@ def tiktok_drafts(root: Path, cfg: dict, poster: TikTokPoster, delete_asset: Cal
     return code
 
 
+def _handoff_text(entry: dict) -> str:
+    caption = entry.get("tiktok_caption") or entry["caption"]
+    return (f"### {entry.get('title') or entry['id']}\n\n[Download {entry['id']}.mp4]({entry['asset_url']})"
+            f"\n\n```\n{caption}\n```\n")
+
+
+def tiktok_handoff(root: Path, cfg: dict, delete_asset: Callable[[int], object], *, now: datetime | None = None,
+                   dry_run: bool = False, commit: Callable[[str], object] | None = None,
+                   log: Callable[[str], None] = print, summary: Callable[[str], None] | None = None) -> int:
+    """Manual mode: list posted clips for upload in TikTok Studio; delete their assets after tiktok_keep_days."""
+    commit = commit or (lambda message: None)
+    summary = summary or log
+    now = now or datetime.now(timezone.utc)
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    cutoff = now - timedelta(days=cfg["tiktok_keep_days"])
+    try:
+        posted = sorted(queue.load_all(root, "posted"), key=lambda e: (e["queued_at"], e["id"]))
+    except (PublishError, OSError, ValueError) as exc:
+        log(f"error: could not read the queue: {exc}")
+        return 1
+    marked = [e for e in posted if "tiktok" in e]
+    new = [e for e in marked if not e["tiktok"]["video_id"]]
+    if dry_run:
+        log(f"TikTok: {len(new)} new clip(s) to hand off")
+        return 0
+    try:
+        for entry in new:
+            entry["tiktok"].update(video_id="manual", url=entry["asset_url"], sent_at=stamp, last_error=None)
+            queue.save(root, "posted", entry)
+            summary(_handoff_text(entry))
+        for entry in marked:
+            state = entry["tiktok"]
+            sent = datetime.strptime(state.get("sent_at") or stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            if state["video_id"] == "manual" and entry.get("asset_id") is not None and sent < cutoff:
+                try:
+                    delete_asset(entry["asset_id"])
+                except PublishError as exc:
+                    log(f"warning: could not delete the release asset: {exc}")
+                entry["asset_id"], state["url"] = None, None
+                queue.save(root, "posted", entry)
+        ready = [e for e in reversed(marked) if e["tiktok"]["video_id"] == "manual" and e.get("asset_id") is not None]
+        days = cfg["tiktok_keep_days"]
+        lines = ["# TikTok uploads", "", f"Clips already on YouTube, newest first. Upload each in TikTok Studio "
+                 f"and paste its caption. Download links work for {days} days after a clip is listed.", ""]
+        lines += [_handoff_text(e) for e in ready] or ["Nothing waiting.\n"]
+        (root / "tiktok.md").write_text("\n".join(lines), encoding="utf-8", newline="\n")
+        commit(f"queue: tiktok handoff ({len(new)} new)")
+    except (PublishError, OSError) as exc:
+        log(f"error: {exc}")
+        return 1
+    log(f"TikTok: {len(new)} new clip(s) listed in queue/tiktok.md; {len(ready)} ready to upload")
+    return 0
+
+
 def _env(names: tuple[str, ...], platform: str) -> list[str] | None:
     missing = [name for name in names if not os.environ.get(name)]
     if missing:
@@ -565,7 +619,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_publish_config()
         tt = None
-        if cfg.get("tiktok") and (args.tiktok_drafts or args.dry_run):
+        manual = cfg.get("tiktok_mode") == "manual"
+        if cfg.get("tiktok") and not manual and (args.tiktok_drafts or args.dry_run):
             values = _env(TT_ENV, "tiktok")
             if values is None:
                 return 2
@@ -578,6 +633,9 @@ def main(argv: list[str] | None = None) -> int:
             if not cfg.get("tiktok"):
                 print("TikTok is off in config/publish.yaml; nothing to do")
                 return 0
+            if manual:
+                return tiktok_handoff(queue.QUEUE_ROOT, cfg, delete, dry_run=args.dry_run, commit=commit,
+                                      summary=_step_summary)
             return tiktok_drafts(queue.QUEUE_ROOT, cfg, tt, delete, dry_run=args.dry_run, commit=commit,
                                  summary=_step_summary, limit=args.limit,
                                  ids=args.ids.split(",") if args.ids else None)
@@ -598,6 +656,8 @@ def main(argv: list[str] | None = None) -> int:
                          youtube=youtube, tiktok_later=bool(cfg.get("tiktok")))
         if args.dry_run and tt is not None:
             code = max(code, tiktok_drafts(queue.QUEUE_ROOT, cfg, tt, delete, dry_run=True))
+        elif args.dry_run and cfg.get("tiktok") and manual:
+            code = max(code, tiktok_handoff(queue.QUEUE_ROOT, cfg, delete, dry_run=True))
         return code
     except PublishError as exc:
         print(f"error: {exc}")

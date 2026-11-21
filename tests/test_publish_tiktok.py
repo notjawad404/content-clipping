@@ -151,3 +151,37 @@ def test_dry_run_checks_credentials_only(tmp_path):
     code, deleted, commits, _ = post_then_draft(tmp_path, http, dry_run=True)
     assert code == 0 and deleted == [] and http.inits == []
     assert [c for c in commits if "tiktok" in c] == []
+
+
+MANUAL = {**CFG, "tiktok_keep_days": 7}
+
+
+def test_manual_handoff_lists_the_clip_and_keeps_the_asset(tmp_path):
+    from clipper.publish.post_next import tiktok_handoff
+    setup(tmp_path, tiktok_caption="Mandy is NOT okay #GTA6")
+    deleted, commits, notes = [], [], []
+    post_next(tmp_path, None, MANUAL, deleted.append, now=NOW, log=lambda m: None, youtube=FakeYouTube(),
+              tiktok_later=True)
+    assert tiktok_handoff(tmp_path, MANUAL, deleted.append, now=NOW, commit=commits.append,
+                          log=lambda m: None, summary=notes.append) == 0
+    posted = queue.load_all(tmp_path, "posted")[0]
+    page = (tmp_path / "tiktok.md").read_text(encoding="utf-8")
+    assert deleted == [] and posted["tiktok"]["video_id"] == "manual"
+    assert "https://example.invalid/a.mp4" in page and "Mandy is NOT okay #GTA6" in page and len(notes) == 1
+    assert commits == ["queue: tiktok handoff (1 new)"]
+
+
+def test_manual_handoff_deletes_the_asset_after_the_keep_window(tmp_path):
+    from datetime import timedelta
+    from clipper.publish.post_next import tiktok_handoff
+    setup(tmp_path)
+    deleted = []
+    post_next(tmp_path, None, MANUAL, deleted.append, now=NOW, log=lambda m: None, youtube=FakeYouTube(),
+              tiktok_later=True)
+    tiktok_handoff(tmp_path, MANUAL, deleted.append, now=NOW, log=lambda m: None, summary=lambda m: None)
+    tiktok_handoff(tmp_path, MANUAL, deleted.append, now=NOW + timedelta(days=6), log=lambda m: None)
+    assert deleted == []
+    tiktok_handoff(tmp_path, MANUAL, deleted.append, now=NOW + timedelta(days=8), log=lambda m: None)
+    posted = queue.load_all(tmp_path, "posted")[0]
+    assert deleted == [7] and posted["asset_id"] is None
+    assert "Nothing waiting" in (tmp_path / "tiktok.md").read_text(encoding="utf-8")

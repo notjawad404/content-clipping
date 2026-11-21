@@ -12,10 +12,10 @@ DEFAULT_PATH = CONFIG_DIR / "publish.yaml"
 REQUIRED = ("clips_repo",)
 DEFAULTS = {"graph_version": "v26.0", "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300,
             "youtube": False, "youtube_privacy": "private", "tiktok": False, "tiktok_privacy": "SELF_ONLY",
-            "tiktok_mode": "draft"}
+            "tiktok_mode": "draft", "tiktok_keep_days": 7}
 YOUTUBE_PRIVACY = ("private", "unlisted", "public")
 TIKTOK_PRIVACY = ("SELF_ONLY", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "PUBLIC_TO_EVERYONE")
-POSITIVE_INT_KEYS = ("max_attempts", "poll_interval_s", "poll_timeout_s")
+POSITIVE_INT_KEYS = ("max_attempts", "poll_interval_s", "poll_timeout_s", "tiktok_keep_days")
 NON_EMPTY_STR_KEYS = ("clips_repo", "graph_version", "queue_branch")
 
 
@@ -57,8 +57,8 @@ def load_publish_config(path: Path = DEFAULT_PATH) -> dict:
             raise PublishConfigError(f"{path.name}: {key} must be true or false")
     if cfg["youtube_privacy"] not in YOUTUBE_PRIVACY:
         raise PublishConfigError(f"{path.name}: youtube_privacy must be one of {', '.join(YOUTUBE_PRIVACY)}")
-    if cfg["tiktok_mode"] not in ("draft", "direct"):
-        raise PublishConfigError(f"{path.name}: tiktok_mode must be draft or direct")
+    if cfg["tiktok_mode"] not in ("manual", "draft", "direct"):
+        raise PublishConfigError(f"{path.name}: tiktok_mode must be manual, draft or direct")
     if cfg["tiktok_privacy"] not in TIKTOK_PRIVACY:
         raise PublishConfigError(f"{path.name}: tiktok_privacy must be one of {', '.join(TIKTOK_PRIVACY)}")
     account = cfg.get("ig_account_id")
