@@ -5,13 +5,16 @@ import pytest
 from clipper.publish import queue
 from clipper.publish.instagram import ProcessingFailed, TokenInvalid as IgTokenInvalid
 from clipper.publish.post_next import DownloadError, YouTubePoster, post_next
-from clipper.publish.youtube import ApiError, QuotaExceeded, TokenInvalid
+from clipper.publish.youtube import ApiError, QuotaExceeded, TokenInvalid, YtError
 from tests.test_publish_post_next import CFG, FakeClient, NOW, setup
 
 LOG = []
 
 
 class FakePoster:
+    key, name, token_hint = "youtube", "YouTube", "regenerate it"
+    token_invalid, quota, api_error = TokenInvalid, QuotaExceeded, YtError
+
     def __init__(self):
         self.posted, self.checked, self.error = [], 0, None
 

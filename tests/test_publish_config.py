@@ -13,7 +13,19 @@ def test_defaults_are_applied(tmp_path):
     cfg = load_publish_config(write(tmp_path, 'clips_repo: me/clips\nig_account_id: "123"\n'))
     assert cfg == {"clips_repo": "me/clips", "ig_account_id": "123", "graph_version": "v26.0",
                    "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300,
-                   "youtube": False, "youtube_privacy": "private"}
+                   "youtube": False, "youtube_privacy": "private", "tiktok": False, "tiktok_privacy": "SELF_ONLY",
+                   "tiktok_mode": "draft"}
+
+
+def test_tiktok_settings_are_validated(tmp_path):
+    cfg = load_publish_config(write(tmp_path, 'clips_repo: me/clips\ntiktok: true\n'))
+    assert cfg["tiktok"] is True and cfg["tiktok_privacy"] == "SELF_ONLY"
+    with pytest.raises(PublishConfigError, match="tiktok_privacy"):
+        load_publish_config(write(tmp_path, 'clips_repo: me/clips\ntiktok: true\ntiktok_privacy: public\n'))
+    with pytest.raises(PublishConfigError, match="tiktok_mode"):
+        load_publish_config(write(tmp_path, 'clips_repo: me/clips\ntiktok: true\ntiktok_mode: later\n'))
+    with pytest.raises(PublishConfigError, match="tiktok must be true or false"):
+        load_publish_config(write(tmp_path, 'clips_repo: me/clips\nyoutube: true\ntiktok: "yes"\n'))
 
 
 def test_youtube_settings_are_validated(tmp_path):

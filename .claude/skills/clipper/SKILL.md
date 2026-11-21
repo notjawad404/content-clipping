@@ -77,7 +77,11 @@ Use these in place of steps 1–4 above when the genre is gaming. Steps 5 and th
 - **Score** the same six keys, read for gaming: `hook` (first 1–3 s grabs a gamer), `standalone`, `payoff` (the reveal or reaction lands), `emotion` (hype, shock, outrage, laughter), `novelty` (new info, detail or take most fans have not seen), `shareability` (would a fan send it to their group chat or argue in the comments?). Same formula.
 - **Hook text:** 3–7 words in gamer language that tease the payoff without giving it away ("GTA 6 MAP IS HUGE", "YOU MISSED THIS DETAIL", "ROCKSTAR CONFIRMED IT"). Never claim something the clip does not show (no "LEAKED GAMEPLAY" or "RELEASE DATE CONFIRMED" unless it really is).
 - **`emphasis_words`:** game and character names, numbers (prices, dates, map sizes), and reaction words.
-- **`post.*`:** name the game in the first line, tease the moment, end with up to 3 hashtags such as `#GTA6 #gaming #gta`. Never present the post as official or as coming from the game's publisher, and credit the creator when a campaign requires it.
+- **`title`** is the YouTube Shorts title: a curiosity hook about the moment (a character, a reaction, a surprise; not a plain description like "X in GTA 6"), at most 85 characters, one fitting emoji, ending with the game's main hashtag (`#GTA6`). Code appends `#Shorts`. Example: `Mandy went from 0 to wedding over ONE sink repair 💀 #GTA6`.
+- **`post.youtube`** (the Shorts description): one hook sentence, a blank line, then 4 hashtags, e.g. `#GTA6 #GTAVI #GTA6Gameplay #gaming` (swap `#GTA6Gameplay` for `#GTA6Trailer` or `#GTA6News` to match the video).
+- **`post.tiktok`:** a hook line that names the game or a character, one line of context, then 5 hashtags, e.g. `#GTA6 #GTAVI #GTA6Gameplay #gaming #fyp`. TikTok drafts don't carry a caption, so this text appears in the posting run's summary for the user to paste.
+- **Other `post.*`:** name the game in the first line, tease the moment, end with up to 3 hashtags such as `#GTA6 #gaming #gta`.
+- Never present a post as official or as coming from the game's publisher, and credit the creator when a campaign requires it.
 
 Write `jobs/<video_id>/clips.json`:
 
@@ -111,7 +115,7 @@ Field rules:
 - `id`: `clip_01`, `clip_02`, … in rank order.
 - `hook_text`: 3–8 punchy words shown on screen for the first 2.5 s. Not the same as the first spoken words.
 - `emphasis_words`: 2–6 single lowercase words from the clip worth highlighting (numbers, names, emotional words).
-- `post.*`: one caption per platform: a short hook line, one sentence of context, up to 3 hashtags. Put hashtags only at the end of each caption. Code appends the campaign's required text, creator tag and required hashtags and caps hashtags at 5, so don't repeat them. X must fit 280 characters.
+- `post.*`: one caption per platform: a short hook line, one sentence of context, up to 3 hashtags (gaming: follow the YouTube and TikTok counts in section 3). Put hashtags only at the end of each caption. Code appends the campaign's required text, creator tag and required hashtags and caps hashtags at 5, so don't repeat them. X must fit 280 characters.
 
 ## 4. Resolve
 

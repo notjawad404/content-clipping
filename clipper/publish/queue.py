@@ -15,18 +15,21 @@ class QueueError(PublishError):
     pass
 
 
-def new_youtube_state() -> dict:
+def new_platform_state() -> dict:
     return {"video_id": None, "url": None, "attempts": 0, "last_error": None}
+
+
+new_youtube_state = new_platform_state
 
 
 def new_entry(*, video_id: str, clip_id: str, campaign: str | None, caption: str, asset_url: str,
               asset_id: int, queued_at: str, title: str | None = None,
-              youtube_description: str | None = None) -> dict:
+              youtube_description: str | None = None, tiktok_caption: str | None = None) -> dict:
     return {"id": f"{video_id}_{clip_id}", "video_id": video_id, "campaign": campaign, "caption": caption,
-            "title": title, "youtube_description": youtube_description,
+            "title": title, "youtube_description": youtube_description, "tiktok_caption": tiktok_caption,
             "asset_url": asset_url, "asset_id": asset_id, "queued_at": queued_at, "attempts": 0,
             "last_error": None, "container_id": None, "media_id": None, "permalink": None,
-            "youtube": new_youtube_state()}
+            "youtube": new_platform_state()}
 
 
 def _dir(root: Path, state: str) -> Path:

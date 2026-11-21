@@ -11,8 +11,10 @@ from clipper.publish import PublishError
 DEFAULT_PATH = CONFIG_DIR / "publish.yaml"
 REQUIRED = ("clips_repo",)
 DEFAULTS = {"graph_version": "v26.0", "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300,
-            "youtube": False, "youtube_privacy": "private"}
+            "youtube": False, "youtube_privacy": "private", "tiktok": False, "tiktok_privacy": "SELF_ONLY",
+            "tiktok_mode": "draft"}
 YOUTUBE_PRIVACY = ("private", "unlisted", "public")
+TIKTOK_PRIVACY = ("SELF_ONLY", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "PUBLIC_TO_EVERYONE")
 POSITIVE_INT_KEYS = ("max_attempts", "poll_interval_s", "poll_timeout_s")
 NON_EMPTY_STR_KEYS = ("clips_repo", "graph_version", "queue_branch")
 
@@ -50,10 +52,15 @@ def load_publish_config(path: Path = DEFAULT_PATH) -> dict:
     for key in NON_EMPTY_STR_KEYS:
         if not _is_non_empty_str(cfg[key]):
             raise PublishConfigError(f"{path.name}: {key} must be a non-empty string")
-    if not isinstance(cfg["youtube"], bool):
-        raise PublishConfigError(f"{path.name}: youtube must be true or false")
+    for key in ("youtube", "tiktok"):
+        if not isinstance(cfg[key], bool):
+            raise PublishConfigError(f"{path.name}: {key} must be true or false")
     if cfg["youtube_privacy"] not in YOUTUBE_PRIVACY:
         raise PublishConfigError(f"{path.name}: youtube_privacy must be one of {', '.join(YOUTUBE_PRIVACY)}")
+    if cfg["tiktok_mode"] not in ("draft", "direct"):
+        raise PublishConfigError(f"{path.name}: tiktok_mode must be draft or direct")
+    if cfg["tiktok_privacy"] not in TIKTOK_PRIVACY:
+        raise PublishConfigError(f"{path.name}: tiktok_privacy must be one of {', '.join(TIKTOK_PRIVACY)}")
     account = cfg.get("ig_account_id")
     if account is None:
         cfg["ig_account_id"] = None
@@ -61,6 +68,6 @@ def load_publish_config(path: Path = DEFAULT_PATH) -> dict:
         cfg["ig_account_id"] = str(account)
     elif not _is_non_empty_str(account):
         raise PublishConfigError(f"{path.name}: ig_account_id must be a non-empty string or an integer")
-    if cfg["ig_account_id"] is None and not cfg["youtube"]:
-        raise PublishConfigError(f"{path.name}: no platform enabled; set ig_account_id or youtube: true")
+    if cfg["ig_account_id"] is None and not cfg["youtube"] and not cfg["tiktok"]:
+        raise PublishConfigError(f"{path.name}: no platform enabled; set ig_account_id, youtube: true or tiktok: true")
     return cfg

@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-from clipper.publish import PublishError, clips_repo, gitops, queue
+from clipper.publish import PublishError, clips_repo, gitops, queue, tiktok
+from clipper.env import PROJECT_ROOT
 from clipper.publish.config import load_publish_config
 from clipper.publish.instagram import IgError, InstagramClient, QuotaExceeded, TokenInvalid
 from clipper.publish.youtube import QuotaExceeded as YtQuotaExceeded
@@ -20,6 +21,7 @@ from clipper.publish.youtube import YouTubeClient, YtError
 DUPLICATE_WINDOW = timedelta(hours=24)
 SHORTS_TAG = "#Shorts"
 YT_ENV = ("YT_CLIENT_ID", "YT_CLIENT_SECRET", "YT_REFRESH_TOKEN")
+TT_ENV = ("TT_CLIENT_KEY", "TT_CLIENT_SECRET", "TT_REFRESH_TOKEN")
 
 
 def _short(caption: str) -> str:
@@ -152,16 +154,18 @@ def _needs_manual_check(root: Path, entry: dict, commit: Callable[[str], object]
 def _finalize(root: Path, entry: dict, delete_asset: Callable[[int], object],
               commit: Callable[[str], object], log: Callable[[str], None]) -> None:
     queue.move(root, entry, "pending", "posted")
-    if entry.get("asset_id") is not None:
+    tiktok_waiting = "tiktok" in entry and not entry["tiktok"]["video_id"]
+    if entry.get("asset_id") is not None and not tiktok_waiting:
         try:
             delete_asset(entry["asset_id"])
         except PublishError as exc:
             log(f"warning: could not delete the release asset: {exc}")
     commit(f"queue: posted {entry['id']}")
     links = [entry.get("permalink") or entry.get("media_id")]
-    youtube_url = (entry.get("youtube") or {}).get("url")
-    if youtube_url:
-        links.append(f"YouTube: {youtube_url}")
+    for key, name in (("youtube", "YouTube"), ("tiktok", "TikTok")):
+        state = entry.get(key) or {}
+        if state.get("url") or state.get("video_id"):
+            links.append(f"{name}: {state.get('url') or state['video_id']}")
     log(f"posted {entry['id']}: {' | '.join(link for link in links if link)}")
 
 
@@ -254,22 +258,25 @@ class DownloadError(PublishError):
     pass
 
 
+def _download(url: str) -> bytes:
+    try:
+        with urllib.request.urlopen(url, timeout=300) as response:
+            return response.read()
+    except (OSError, http.client.HTTPException) as exc:
+        raise DownloadError(f"could not download the clip: {type(exc).__name__}") from None
+
+
 class YouTubePoster:
     """Downloads a queued clip's Release asset and uploads it to YouTube. The queue never touches the client."""
+    key, name = "youtube", "YouTube"
+    token_invalid, quota, api_error = YtTokenInvalid, YtQuotaExceeded, YtError
+    token_hint = "Generate a new refresh token with scripts/yt_auth.py and update the YT_REFRESH_TOKEN secret."
 
     def __init__(self, client: YouTubeClient, privacy: str,
                  fetch: Callable[[str], bytes] | None = None):
         self._client = client
         self._privacy = privacy
-        self._fetch = fetch or self._download
-
-    @staticmethod
-    def _download(url: str) -> bytes:
-        try:
-            with urllib.request.urlopen(url, timeout=300) as response:
-                return response.read()
-        except (OSError, http.client.HTTPException) as exc:
-            raise DownloadError(f"could not download the clip: {type(exc).__name__}") from None
+        self._fetch = fetch or _download
 
     def check(self) -> None:
         self._client.access_token()
@@ -279,6 +286,9 @@ class YouTubePoster:
         if len(title) + len(SHORTS_TAG) + 1 <= 100:
             title = f"{title} {SHORTS_TAG}"
         description = entry.get("youtube_description") or entry["caption"]
+        tags = [w for w in str(entry["caption"]).split() if w.startswith("#") and w.lower() not in description.lower()]
+        if "#" not in description and tags:
+            description = f"{description}\n\n{' '.join(tags)}"
         if SHORTS_TAG.lower() not in description.lower():
             description = f"{description}\n\n{SHORTS_TAG}"
         video_id = self._client.upload(self._fetch(entry["asset_url"]), title, description,
@@ -286,113 +296,168 @@ class YouTubePoster:
         return video_id, f"https://www.youtube.com/shorts/{video_id}"
 
 
-def _youtube(root: Path, entry: dict, cfg: dict, poster, dry_run: bool, commit: Callable[[str], object],
-             log: Callable[[str], None]) -> int:
-    state = entry["youtube"]
+def _local_or_download(entry: dict) -> bytes:
+    local = PROJECT_ROOT / "output" / entry["video_id"] / f"{entry['id'][len(entry['video_id']) + 1:]}.mp4"
+    return local.read_bytes() if local.exists() else _download(entry["asset_url"])
+
+
+class TikTokPoster:
+    """Sends a clip to TikTok as an inbox draft (default) or a direct post. Still processing at the timeout
+    counts as sent."""
+    key, name = "tiktok", "TikTok"
+    token_invalid, quota, api_error = tiktok.TokenInvalid, tiktok.QuotaExceeded, tiktok.TtError
+    token_hint = "Generate a new refresh token with scripts/tiktok_auth.py and update the TT_REFRESH_TOKEN secret."
+
+    def __init__(self, client: tiktok.TikTokClient, privacy: str, interval_s: float = 10, timeout_s: float = 300,
+                 fetch: Callable[[dict], bytes] | None = None, mode: str = "direct"):
+        self._client = client
+        self._privacy = privacy
+        self._interval = interval_s
+        self._timeout = timeout_s
+        self._fetch = fetch or _local_or_download
+        self.mode = mode
+
+    def _check_privacy(self, info: dict) -> None:
+        options = info.get("privacy_level_options") or []
+        if self._privacy not in options:
+            raise tiktok.ApiError(f"privacy {self._privacy} is not allowed for this account "
+                                  f"(allowed: {', '.join(options) or 'none'})")
+
+    def check(self) -> None:
+        if self.mode == "draft":
+            self._client.access_token()
+        else:
+            self._check_privacy(self._client.creator_info())
+
+    def post(self, entry: dict) -> tuple[str, str | None]:
+        if self.mode == "draft":
+            publish_id = self._client.upload_draft(self._fetch(entry))
+            try:
+                self._client.wait(publish_id, self._interval, self._timeout, done=("SEND_TO_USER_INBOX",
+                                                                                   "PUBLISH_COMPLETE"))
+            except tiktok.ApiError as exc:
+                if exc.code != "TIMEOUT":
+                    raise
+            return publish_id, None
+        info = self._client.creator_info()
+        self._check_privacy(info)
+        caption = entry.get("tiktok_caption") or entry["caption"]
+        publish_id = self._client.upload(self._fetch(entry), caption, self._privacy)
+        try:
+            done = self._client.wait(publish_id, self._interval, self._timeout)
+        except tiktok.ApiError as exc:
+            if exc.code == "TIMEOUT":
+                return publish_id, None
+            raise
+        ids = done.get("publicaly_available_post_id") or []
+        user = info.get("creator_username")
+        return publish_id, (f"https://www.tiktok.com/@{user}/video/{ids[0]}" if ids and user else None)
+
+
+def _platform(root: Path, entry: dict, cfg: dict, poster, dry_run: bool, commit: Callable[[str], object],
+              log: Callable[[str], None], where: str = "pending") -> int:
+    state = entry.setdefault(poster.key, queue.new_platform_state())
     if state["video_id"] or state["attempts"] >= cfg["max_attempts"]:
         return 0
     try:
         if dry_run:
             poster.check()
-            log("dry run: YouTube token refreshed; not uploading")
+            log(f"dry run: {poster.name} credentials work; not uploading")
             return 0
         video_id, url = poster.post(entry)
-    except YtTokenInvalid as exc:
-        log(f"error: YouTube rejected the credentials ({exc}). Generate a new refresh token with "
-            "scripts/yt_auth.py and update the YT_REFRESH_TOKEN secret.")
+    except poster.token_invalid as exc:
+        log(f"error: {poster.name} rejected the credentials ({exc}). {poster.token_hint}")
         return 1
-    except YtQuotaExceeded:
-        log("YouTube upload quota reached; will retry on the next run")
+    except poster.quota:
+        log(f"{poster.name} posting limit reached; will retry on the next run")
         return 0
-    except YtError as exc:
+    except poster.api_error as exc:
         if dry_run:
-            log(f"dry run failed: {exc}")
+            log(f"dry run failed: {poster.name}: {exc}")
             return 1
         state["attempts"] += 1
         state["last_error"] = str(exc)
-        queue.save(root, "pending", entry)
-        log(f"error: YouTube: {exc} (attempt {state['attempts']}/{cfg['max_attempts']})")
+        queue.save(root, where, entry)
+        log(f"error: {poster.name}: {exc} (attempt {state['attempts']}/{cfg['max_attempts']})")
         try:
-            commit(f"queue: youtube attempt {state['attempts']} failed for {entry['id']}")
+            commit(f"queue: {poster.key} attempt {state['attempts']} failed for {entry['id']}")
         except PublishError as commit_exc:
             log(f"error: could not commit the failure record: {commit_exc}")
         return 1
     except (PublishError, OSError) as exc:
-        log(f"error: YouTube: {exc}")  # download/queue problems are not YouTube's fault: no attempt counted
+        log(f"error: {poster.name}: {exc}")  # download/queue problems are not the platform's fault
         return 1
     state.update(video_id=video_id, url=url, last_error=None)
     try:
-        queue.save(root, "pending", entry)
-        commit(f"queue: youtube published {entry['id']}")
+        queue.save(root, where, entry)
+        commit(f"queue: {poster.key} published {entry['id']}")
     except (PublishError, OSError) as exc:
-        log(f"error: {exc}; the clip is on YouTube ({url}) but the queue update was not completed")
+        log(f"error: {exc}; the clip is on {poster.name} ({url or video_id}) but the queue update was not completed")
         return 1
     return 0
 
 
-def _settle(root: Path, entry: dict, cfg: dict, delete_asset: Callable[[int], object],
-            commit: Callable[[str], object], log: Callable[[str], None]) -> None:
+def _open(state: dict, limit: int) -> bool:
+    return not state["video_id"] and state["attempts"] < limit
+
+
+def _settle(root: Path, entry: dict, cfg: dict, posters: list, delete_asset: Callable[[int], object],
+            commit: Callable[[str], object], log: Callable[[str], None], *, instagram: bool) -> None:
     """Close the entry once no platform can still be retried."""
     limit = cfg["max_attempts"]
-    done_ig, done_yt = bool(entry.get("media_id")), bool(entry["youtube"]["video_id"])
-    if (not done_ig and entry["attempts"] < limit) or (not done_yt and entry["youtube"]["attempts"] < limit):
+    states = [entry[p.key] for p in posters]
+    ig_open = instagram and not entry.get("media_id") and entry["attempts"] < limit
+    if ig_open or any(_open(s, limit) for s in states):
         return
-    if done_ig or done_yt:
+    if (instagram and entry.get("media_id")) or any(s["video_id"] for s in states):
         _finalize(root, entry, delete_asset, commit, log)
         return
+    entry.pop("tiktok", None)
     queue.move(root, entry, "pending", "failed")
     commit(f"queue: failed {entry['id']}")
     log(f"{entry['id']}: every platform ran out of attempts; entry is now failed")
 
 
-def _post_both(root: Path, client, cfg: dict, entry: dict, delete_asset: Callable[[int], object], poster,
+def _post_platforms(root: Path, entry: dict, cfg: dict, delete_asset: Callable[[int], object], posters: list,
+                    dry_run: bool, commit: Callable[[str], object], log: Callable[[str], None], *,
+                    code: int = 0, instagram: bool = False) -> int:
+    try:
+        for poster in posters:
+            code = max(code, _platform(root, entry, cfg, poster, dry_run, commit, log))
+        if not dry_run:
+            _settle(root, entry, cfg, posters, delete_asset, commit, log, instagram=instagram)
+    except (PublishError, OSError) as exc:
+        log(f"error: {exc}")
+        return 1
+    return code
+
+
+def _post_both(root: Path, client, cfg: dict, entry: dict, delete_asset: Callable[[int], object], posters: list,
                dry_run: bool, commit: Callable[[str], object], now: datetime, log: Callable[[str], None]) -> int:
     limit = cfg["max_attempts"]
-    entry.setdefault("youtube", queue.new_youtube_state())
-    youtube_open = not entry["youtube"]["video_id"] and entry["youtube"]["attempts"] < limit
+    for poster in posters:
+        entry.setdefault(poster.key, queue.new_platform_state())
+    others_open = any(_open(entry[p.key], limit) for p in posters)
     code = 0
     if not entry.get("media_id") and entry["attempts"] < limit:
         code = _instagram(root, client, cfg, entry, delete_asset, dry_run, commit, now, log,
-                          finalize=False, keep_open=youtube_open)
+                          finalize=False, keep_open=others_open)
     elif entry.get("media_id"):
-        log("already published on Instagram; only YouTube is left")
+        log("already published on Instagram; only the other platforms are left")
     if not queue.path_for(root, "pending", entry["id"]).exists():
         return code  # Instagram moved it (needs a manual check); nothing more to do automatically
-    try:
-        code = max(code, _youtube(root, entry, cfg, poster, dry_run, commit, log))
-        if not dry_run:
-            _settle(root, entry, cfg, delete_asset, commit, log)
-    except (PublishError, OSError) as exc:
-        log(f"error: {exc}")
-        return 1
-    return code
-
-
-def _post_youtube_only(root: Path, entry: dict, cfg: dict, delete_asset: Callable[[int], object], poster,
-                       dry_run: bool, commit: Callable[[str], object], log: Callable[[str], None]) -> int:
-    entry.setdefault("youtube", queue.new_youtube_state())
-    try:
-        code = _youtube(root, entry, cfg, poster, dry_run, commit, log)
-        if dry_run:
-            return code
-        state = entry["youtube"]
-        if state["video_id"]:
-            _finalize(root, entry, delete_asset, commit, log)
-        elif state["attempts"] >= cfg["max_attempts"]:
-            queue.move(root, entry, "pending", "failed")
-            commit(f"queue: failed {entry['id']}")
-            log(f"{entry['id']}: YouTube ran out of attempts; entry is now failed")
-    except (PublishError, OSError) as exc:
-        log(f"error: {exc}")
-        return 1
-    return code
+    return _post_platforms(root, entry, cfg, delete_asset, posters, dry_run, commit, log,
+                           code=code, instagram=True)
 
 
 def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], object], *, dry_run: bool = False,
               commit: Callable[[str], object] | None = None, now: datetime | None = None,
-              log: Callable[[str], None] = print, youtube: YouTubePoster | None = None) -> int:
+              log: Callable[[str], None] = print, youtube: YouTubePoster | None = None,
+              tiktok_later: bool = False) -> int:
+    """`tiktok_later`: mark the entry for a TikTok draft once it is posted, and keep its asset until then."""
     commit = commit or (lambda message: None)
     now = now or datetime.now(timezone.utc)
+    posters = [youtube] if youtube is not None else []
     try:
         entry = queue.next_pending(root)
     except (PublishError, OSError, ValueError) as exc:
@@ -404,22 +469,118 @@ def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], objec
     if _is_stale_duplicate(root, entry):
         return _remove_stale_duplicate(root, entry, commit, log, dry_run)
     log(f"next: {entry['id']} ({_short(entry['caption'])})")
+    if tiktok_later:
+        entry.setdefault("tiktok", queue.new_platform_state())
     if client is None:
-        if youtube is None:
+        if not posters:
             log("error: no platform configured")
             return 1
-        return _post_youtube_only(root, entry, cfg, delete_asset, youtube, dry_run, commit, log)
-    if youtube is not None:
-        return _post_both(root, client, cfg, entry, delete_asset, youtube, dry_run, commit, now, log)
+        return _post_platforms(root, entry, cfg, delete_asset, posters, dry_run, commit, log)
+    if posters:
+        return _post_both(root, client, cfg, entry, delete_asset, posters, dry_run, commit, now, log)
     return _instagram(root, client, cfg, entry, delete_asset, dry_run, commit, now, log)
+
+
+def tiktok_drafts(root: Path, cfg: dict, poster: TikTokPoster, delete_asset: Callable[[int], object], *,
+                  dry_run: bool = False, commit: Callable[[str], object] | None = None,
+                  log: Callable[[str], None] = print, summary: Callable[[str], None] | None = None,
+                  limit: int = 5, ids: list[str] | None = None) -> int:
+    """Send already-posted clips to TikTok, oldest first. `ids` also picks posted clips not marked for TikTok."""
+    commit = commit or (lambda message: None)
+    summary = summary or log
+    try:
+        posted = sorted(queue.load_all(root, "posted"), key=lambda e: (e["queued_at"], e["id"]))
+    except (PublishError, OSError, ValueError) as exc:
+        log(f"error: could not read the queue: {exc}")
+        return 1
+    if ids is not None:
+        wanted = [e for e in posted if e["id"] in ids]
+        for entry in wanted:
+            entry.setdefault("tiktok", queue.new_platform_state())
+    else:
+        wanted = [e for e in posted if "tiktok" in e]
+    wanted = [e for e in wanted if _open(e["tiktok"], cfg["max_attempts"])]
+    if not wanted:
+        log("TikTok: nothing waiting")
+        return 0
+    if dry_run:
+        log(f"TikTok: {len(wanted)} clip(s) waiting")
+        return _platform(root, wanted[0], cfg, poster, True, commit, log, where="posted")
+    code, sent = 0, 0
+    for entry in wanted[:limit]:
+        code = max(code, _platform(root, entry, cfg, poster, False, commit, log, where="posted"))
+        state = entry["tiktok"]
+        if state["video_id"]:
+            sent += 1
+            caption = entry.get("tiktok_caption") or entry["caption"]
+            summary(f"### {entry['id']}\n\n{entry.get('title') or ''}\n\n```\n{caption}\n```\n")
+        elif state["attempts"] < cfg["max_attempts"]:
+            break  # posting limit or a fresh failure: try again on the next run
+        if entry.get("asset_id") is not None:
+            try:
+                delete_asset(entry["asset_id"])
+            except PublishError as exc:
+                log(f"warning: could not delete the release asset: {exc}")
+    verb = "drafts sent to your TikTok inbox" if poster.mode == "draft" else "posted to TikTok"
+    log(f"TikTok: {sent} {verb}")
+    return code
+
+
+def _env(names: tuple[str, ...], platform: str) -> list[str] | None:
+    missing = [name for name in names if not os.environ.get(name)]
+    if missing:
+        print(f"error: {platform} is enabled but these environment variables are not set: {', '.join(missing)}")
+        return None
+    return [os.environ[name] for name in names]
+
+
+def _load_dotenv(path: Path = PROJECT_ROOT / ".env") -> None:
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            key, value = (part.strip() for part in line.split("=", 1))
+            if value:
+                os.environ.setdefault(key, value)
+
+
+def _step_summary(text: str) -> None:
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if target:
+        with open(target, "a", encoding="utf-8") as handle:
+            handle.write(text + "\n")
+    print(text)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="post-next", description="Post the oldest queued clip")
     parser.add_argument("--dry-run", action="store_true", help="check credentials and processing, do not publish")
+    parser.add_argument("--tiktok-drafts", action="store_true", help="send posted clips to TikTok instead")
+    parser.add_argument("--ids", help="with --tiktok-drafts: comma-separated posted clip ids to send")
+    parser.add_argument("--limit", type=int, default=5, help="with --tiktok-drafts: most clips to send")
+    parser.add_argument("--no-commit", action="store_true", help="update queue files without committing")
     args = parser.parse_args(argv)
+    if args.tiktok_drafts:
+        _load_dotenv()
     try:
         cfg = load_publish_config()
+        tt = None
+        if cfg.get("tiktok") and (args.tiktok_drafts or args.dry_run):
+            values = _env(TT_ENV, "tiktok")
+            if values is None:
+                return 2
+            tt = TikTokPoster(tiktok.TikTokClient(*values), cfg["tiktok_privacy"], cfg["poll_interval_s"],
+                              cfg["poll_timeout_s"], mode=cfg["tiktok_mode"])
+        commit = None if args.dry_run or args.no_commit else (
+            lambda message: gitops.commit_queue(message, branch=cfg["queue_branch"]))
+        delete = lambda asset_id: clips_repo.delete_asset(cfg["clips_repo"], asset_id)  # noqa: E731
+        if args.tiktok_drafts:
+            if not cfg.get("tiktok"):
+                print("TikTok is off in config/publish.yaml; nothing to do")
+                return 0
+            return tiktok_drafts(queue.QUEUE_ROOT, cfg, tt, delete, dry_run=args.dry_run, commit=commit,
+                                 summary=_step_summary, limit=args.limit,
+                                 ids=args.ids.split(",") if args.ids else None)
         client = None
         if cfg.get("ig_account_id"):
             token = os.environ.get("IG_ACCESS_TOKEN")
@@ -427,20 +588,17 @@ def main(argv: list[str] | None = None) -> int:
                 print("error: the IG_ACCESS_TOKEN environment variable is not set")
                 return 2
             client = InstagramClient(token, cfg["ig_account_id"], cfg["graph_version"])
-        poster = None
+        youtube = None
         if cfg.get("youtube"):
-            missing = [name for name in YT_ENV if not os.environ.get(name)]
-            if missing:
-                print(f"error: youtube is enabled but these environment variables are not set: {', '.join(missing)}")
+            values = _env(YT_ENV, "youtube")
+            if values is None:
                 return 2
-            poster = YouTubePoster(YouTubeClient(*(os.environ[name] for name in YT_ENV)),
-                                   cfg.get("youtube_privacy", "private"))
-        return post_next(queue.QUEUE_ROOT, client, cfg,
-                         lambda asset_id: clips_repo.delete_asset(cfg["clips_repo"], asset_id),
-                         dry_run=args.dry_run,
-                         commit=None if args.dry_run
-                         else (lambda message: gitops.commit_queue(message, branch=cfg["queue_branch"])),
-                         youtube=poster)
+            youtube = YouTubePoster(YouTubeClient(*values), cfg.get("youtube_privacy", "private"))
+        code = post_next(queue.QUEUE_ROOT, client, cfg, delete, dry_run=args.dry_run, commit=commit,
+                         youtube=youtube, tiktok_later=bool(cfg.get("tiktok")))
+        if args.dry_run and tt is not None:
+            code = max(code, tiktok_drafts(queue.QUEUE_ROOT, cfg, tt, delete, dry_run=True))
+        return code
     except PublishError as exc:
         print(f"error: {exc}")
         return 2

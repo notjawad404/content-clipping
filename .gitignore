@@ -11,3 +11,4 @@ models/
 
 # macOS
 .DS_Store
+.env
