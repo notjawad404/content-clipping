@@ -2,8 +2,12 @@ name: post-next
 
 on:
   schedule:
-    - cron: "41 19 * * *"   # ~3 PM ET / 12 PM PT after the random delay (4 PM ET in summer)
-    - cron: "41 1 * * *"    # ~9 PM ET / 6 PM PT after the random delay (10 PM ET in summer)
+    # US Eastern after the random delay; an hour later in summer (EDT)
+    - cron: "41 14 * * *"   # ~10 AM ET / 7 AM PT
+    - cron: "41 17 * * *"   # ~1 PM ET / 10 AM PT
+    - cron: "41 20 * * *"   # ~4 PM ET / 1 PM PT
+    - cron: "41 23 * * *"   # ~7 PM ET / 4 PM PT
+    - cron: "41 2 * * *"    # ~10 PM ET / 7 PM PT
   workflow_dispatch:
     inputs:
       dry_run:
