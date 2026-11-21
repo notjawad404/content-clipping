@@ -42,7 +42,8 @@ def enqueue_job(job: Job, root: Path, repo: str, *, upload=clips_repo.upload_ass
             entry = queue.new_entry(video_id=job.video_id, clip_id=cid, campaign=campaign, caption=caption,
                                     asset_url=url, asset_id=asset_id, queued_at=stamp, title=title,
                                     youtube_description=clip["post"].get("youtube") or caption,
-                                    tiktok_caption=clip["post"].get("tiktok") or caption)
+                                    tiktok_caption=clip["post"].get("tiktok") or caption,
+                                    youtube_tags=clip.get("youtube_tags"))
             try:
                 queue.save(root, "pending", entry)
             except OSError as exc:

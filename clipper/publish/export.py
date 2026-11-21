@@ -27,6 +27,7 @@ def captions_text(entry: dict) -> str:
     if youtube.get("url"):
         lines += [f"YouTube: {youtube['url']}", ""]
     lines += ["== YouTube description ==", entry.get("youtube_description") or entry["caption"], "",
+              "== YouTube tags ==", ", ".join(entry.get("youtube_tags") or []), "",
               "== TikTok caption ==", entry.get("tiktok_caption") or entry["caption"], "",
               "== Instagram caption ==", entry["caption"], ""]
     return "\n".join(lines)

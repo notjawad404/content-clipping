@@ -230,3 +230,18 @@ def test_youtube_only_dry_run_changes_nothing(tmp_path):
     code, deleted, commits, _ = run(tmp_path, None, poster, dry_run=True)
     assert code == 0 and poster.checked == 1 and poster.posted == []
     assert deleted == [] and commits == [] and len(queue.load_all(tmp_path, "pending")) == 1
+
+
+def test_tags_are_passed_and_fit_youtubes_limit():
+    from clipper.publish.post_next import _fit_tags
+    seen = {}
+
+    class Client:
+        def upload(self, video, title, description, tags=None, privacy="private", category_id="22"):
+            seen["tags"] = tags
+            return "v1"
+
+    entry = {"caption": "c #GTA6", "asset_url": "u", "youtube_tags": ["GTA 6", "#GTAVI", "gta 6", "x" * 495]}
+    YouTubePoster(Client(), "public", fetch=lambda url: b"v").post(entry)
+    assert seen["tags"] == ["GTA 6", "GTAVI"]
+    assert sum(len(t) for t in _fit_tags(["a" * 100] * 10)) <= 500

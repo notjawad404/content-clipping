@@ -266,6 +266,17 @@ def _download(url: str) -> bytes:
         raise DownloadError(f"could not download the clip: {type(exc).__name__}") from None
 
 
+def _fit_tags(tags: list[str], limit: int = 500) -> list[str]:
+    """YouTube caps tags at 500 characters, counting a comma between tags and quotes around ones with spaces."""
+    kept, used = [], 0
+    for tag in (str(t).strip().lstrip("#") for t in tags):
+        cost = len(tag) + (2 if " " in tag else 0) + (1 if kept else 0)
+        if tag and tag.lower() not in (k.lower() for k in kept) and used + cost <= limit:
+            kept.append(tag)
+            used += cost
+    return kept
+
+
 class YouTubePoster:
     """Downloads a queued clip's Release asset and uploads it to YouTube. The queue never touches the client."""
     key, name = "youtube", "YouTube"
@@ -292,7 +303,7 @@ class YouTubePoster:
         if SHORTS_TAG.lower() not in description.lower():
             description = f"{description}\n\n{SHORTS_TAG}"
         video_id = self._client.upload(self._fetch(entry["asset_url"]), title, description,
-                                       privacy=self._privacy)
+                                       tags=_fit_tags(entry.get("youtube_tags") or []), privacy=self._privacy)
         return video_id, f"https://www.youtube.com/shorts/{video_id}"
 
 
