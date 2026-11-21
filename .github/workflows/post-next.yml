@@ -2,12 +2,7 @@ name: post-next
 
 on:
   schedule:
-    # US Eastern after the random delay; an hour later in summer (EDT)
-    - cron: "41 14 * * *"   # ~10 AM ET / 7 AM PT
-    - cron: "41 17 * * *"   # ~1 PM ET / 10 AM PT
-    - cron: "41 20 * * *"   # ~4 PM ET / 1 PM PT
-    - cron: "41 23 * * *"   # ~7 PM ET / 4 PM PT
-    - cron: "41 2 * * *"    # ~10 PM ET / 7 PM PT
+    - cron: "41 11 * * *"   # ~6:40 AM ET: the day's clips go up private, to be scheduled in YouTube Studio
   workflow_dispatch:
     inputs:
       dry_run:
@@ -37,10 +32,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      - name: Random delay before posting (scheduled runs only)
-        if: github.event_name == 'schedule'
-        run: sleep $(( RANDOM % 1200 ))
-      - name: Post the next queued clip
+      - name: Post the next queued clips (up to 5)
         env:
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           GH_TOKEN: ${{ secrets.CLIPS_REPO_TOKEN || github.token }}
@@ -52,5 +44,8 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             python -m clipper.publish.post_next --dry-run
           else
-            python -m clipper.publish.post_next
+            for i in 1 2 3 4 5; do
+              ls queue/pending/*.json >/dev/null 2>&1 || break
+              python -m clipper.publish.post_next
+            done
           fi

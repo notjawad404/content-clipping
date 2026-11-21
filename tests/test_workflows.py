@@ -46,6 +46,7 @@ def test_post_next_workflow_wiring_of_secrets_and_dry_run():
     assert script.split("else")[0].count("--dry-run") == 1
 
 
-def test_post_next_is_scheduled_three_times_a_day():
+def test_post_next_runs_once_a_day_for_five_clips():
     schedule = triggers(load())["schedule"]
-    assert schedule == [{"cron": c} for c in ("41 14 * * *", "41 17 * * *", "41 20 * * *", "41 23 * * *", "41 2 * * *")]
+    assert schedule == [{"cron": "41 11 * * *"}]
+    assert "for i in 1 2 3 4 5; do" in WORKFLOW.read_text()
