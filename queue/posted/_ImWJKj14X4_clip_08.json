@@ -3,10 +3,10 @@
   "video_id": "_ImWJKj14X4",
   "campaign": null,
   "caption": "GTA 6's Cal wanted more beer and fewer guns \ud83d\ude02 This is not the job he signed up for.\n#GTA6 #gaming #gta",
-  "title": "Cal wanted more beer and fewer guns \ud83d\ude02 #GTA6",
-  "youtube_description": "GTA 6 crime is NOT the job Cal signed up for \ud83d\ude02\n\n#GTA6 #GTAVI #GTA6Gameplay #gaming",
+  "title": "Cal realises GTA 6 crime isn't what he signed up for",
+  "youtube_description": "GTA 6: Cal did NOT sign up for this \ud83d\ude02",
   "asset_url": "https://github.com/notjawad404/content-clipping/releases/download/v-_ImWJKj14X4/clip_08.mp4",
-  "asset_id": 775392816,
+  "asset_id": 775874597,
   "queued_at": "2026-11-21T11:42:05Z",
   "attempts": 0,
   "last_error": null,
@@ -19,5 +19,11 @@
     "attempts": 0,
     "last_error": null
   },
-  "tiktok_caption": "Cal wanted more beer and fewer guns \ud83d\ude02 This is not the job he signed up for.\n#GTA6 #GTAVI #GTA6Gameplay #gaming #fyp"
+  "tiktok_caption": "Cal wanted more beer and fewer guns \ud83d\ude02 This is not the job he signed up for.\n#GTA6 #GTAVI #GTA6Gameplay #gaming #fyp",
+  "tiktok": {
+    "video_id": null,
+    "url": null,
+    "attempts": 0,
+    "last_error": null
+  }
 }

@@ -3,10 +3,10 @@
   "video_id": "_ImWJKj14X4",
   "campaign": null,
   "caption": "GTA 6 tenant tried 'money is a social construct' on Jason \ud83d\udc80\n#GTA6 #gaming #gta",
-  "title": "He tried 'money is a social construct' on rent day \ud83d\udc80 #GTA6",
-  "youtube_description": "Jason collects rent from a hippie acid lab and it goes exactly how you'd expect \ud83d\udc80\n\n#GTA6 #GTAVI #GTA6Gameplay #gaming",
+  "title": "Collecting rent from a hippie acid lab in GTA 6",
+  "youtube_description": "GTA 6: When rent is due \ud83d\udc80",
   "asset_url": "https://github.com/notjawad404/content-clipping/releases/download/v-_ImWJKj14X4/clip_05.mp4",
-  "asset_id": 771328580,
+  "asset_id": 775873818,
   "queued_at": "2026-11-20T10:06:17Z",
   "attempts": 0,
   "last_error": null,
@@ -19,5 +19,11 @@
     "attempts": 0,
     "last_error": null
   },
-  "tiktok_caption": "Telling Jason 'money is a social construct' on rent day \ud83d\udc80\n#GTA6 #GTAVI #GTA6Gameplay #gaming #fyp"
+  "tiktok_caption": "Telling Jason 'money is a social construct' on rent day \ud83d\udc80\n#GTA6 #GTAVI #GTA6Gameplay #gaming #fyp",
+  "tiktok": {
+    "video_id": null,
+    "url": null,
+    "attempts": 0,
+    "last_error": null
+  }
 }
