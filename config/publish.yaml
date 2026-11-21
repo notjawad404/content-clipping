@@ -4,7 +4,7 @@ clips_repo: notjawad404/content-clipping   # public repo whose Releases host the
 graph_version: v26.0
 queue_branch: master                        # the branch the cron reads; queueing is refused anywhere else
 youtube: true                               # also post each clip to YouTube Shorts
-youtube_privacy: private                    # stays private until the YouTube API audit passes; then public
+youtube_privacy: public                     # YouTube forces private until the API project passes its audit
 max_attempts: 3
 poll_interval_s: 10
 poll_timeout_s: 300
