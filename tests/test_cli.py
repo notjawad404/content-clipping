@@ -222,7 +222,7 @@ def queue_cli(monkeypatch, rows, commit=lambda message: True):
     commits = []
     monkeypatch.setattr(cli, "load_publish_config", lambda: PUBLISH_CFG)
     monkeypatch.setattr(cli, "commit_queue", lambda message, branch=None: commits.append(message) or commit(message))
-    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: rows)
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None, export=None: rows)
     return commits
 
 
@@ -230,7 +230,7 @@ def test_queue_command_passes_the_configured_branch_to_commit_queue(monkeypatch)
     seen = []
     monkeypatch.setattr(cli, "load_publish_config", lambda: {**PUBLISH_CFG, "queue_branch": "trunk"})
     monkeypatch.setattr(cli, "commit_queue", lambda message, branch=None: seen.append((message, branch)) or True)
-    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "T", "queued")])
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None, export=None: [("clip_01", "T", "queued")])
     assert cli.main(["queue", "vid"]) == 0
     assert seen == [("queue: add vid", "trunk")]
 
@@ -242,7 +242,7 @@ def test_queue_command_reports_a_wrong_branch_refusal_as_one_line_error(monkeypa
 
     monkeypatch.setattr(cli, "load_publish_config", lambda: PUBLISH_CFG)
     monkeypatch.setattr(cli, "commit_queue", refuse)
-    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "T", "queued")])
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None, export=None: [("clip_01", "T", "queued")])
     assert cli.main(["queue", "vid"]) == 2
     assert "git checkout master" in capsys.readouterr().out
 
@@ -291,7 +291,7 @@ def test_queue_command_second_run_retries_after_a_failed_commit(monkeypatch, cap
     assert cli.main(["queue", "vid"]) == 2
     assert "error: git push failed: rejected" in capsys.readouterr().out
     queue_cli_rows = [("clip_01", "T", "skipped: already queued")]
-    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: queue_cli_rows)
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None, export=None: queue_cli_rows)
     assert cli.main(["queue", "vid"]) == 0
     assert commits == ["queue: add vid", "queue: add vid"]
     assert "queued entries committed and pushed" in capsys.readouterr().out
@@ -301,7 +301,7 @@ def test_queue_command_commits_the_queued_clips_but_exits_nonzero_when_any_faile
     commits = []
     monkeypatch.setattr(cli, "load_publish_config", lambda: PUBLISH_CFG)
     monkeypatch.setattr(cli, "commit_queue", lambda message, branch=None: commits.append(message))
-    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None, export=None: [
         ("clip_01", "A", "failed: upload asset failed: denied"), ("clip_02", "B", "queued")])
     assert cli.main(["queue", "vid"]) == 1
     assert commits == ["queue: add vid"]
@@ -312,7 +312,7 @@ def test_queue_command_does_not_commit_when_every_clip_failed(monkeypatch):
     commits = []
     monkeypatch.setattr(cli, "load_publish_config", lambda: PUBLISH_CFG)
     monkeypatch.setattr(cli, "commit_queue", lambda message, branch=None: commits.append(message))
-    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "A", "failed: x")])
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None, export=None: [("clip_01", "A", "failed: x")])
     assert cli.main(["queue", "vid"]) == 1
     assert commits == []
 
@@ -323,7 +323,7 @@ def test_queue_command_reports_a_commit_failure_as_one_line_error(monkeypatch, c
 
     monkeypatch.setattr(cli, "load_publish_config", lambda: PUBLISH_CFG)
     monkeypatch.setattr(cli, "commit_queue", boom)
-    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None: [("clip_01", "T", "queued")])
+    monkeypatch.setattr(cli, "enqueue_job", lambda job, root, repo, only=None, export=None: [("clip_01", "T", "queued")])
     assert cli.main(["queue", "vid"]) == 2
     out = capsys.readouterr().out
     assert "error: git push failed: rejected" in out and "Traceback" not in out

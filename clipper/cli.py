@@ -20,6 +20,7 @@ from clipper.publish import post_next as post_next_mod
 from clipper.publish import post_now as post_now_mod
 from clipper.publish.config import load_publish_config
 from clipper.publish.enqueue import enqueue_job
+from clipper.publish.export import export_entry
 from clipper.publish.gitops import commit_queue
 from clipper.publish.queue import QUEUE_ROOT
 
@@ -174,7 +175,7 @@ def cmd_finish(args: argparse.Namespace) -> int:
 
 def cmd_queue(args: argparse.Namespace) -> int:
     cfg = load_publish_config()
-    rows = enqueue_job(job_for(args.video_id), QUEUE_ROOT, cfg["clips_repo"], only=args.only)
+    rows = enqueue_job(job_for(args.video_id), QUEUE_ROOT, cfg["clips_repo"], only=args.only, export=export_entry)
     for cid, title, status in rows:
         print(f"{cid}  {status}  {title}")
     if any(status in ("queued", "skipped: already queued") for _, _, status in rows):

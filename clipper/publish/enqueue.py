@@ -11,7 +11,7 @@ from clipper.publish.clips_repo import RepoError
 
 
 def enqueue_job(job: Job, root: Path, repo: str, *, upload=clips_repo.upload_asset, now: datetime | None = None,
-                only: list[str] | None = None) -> list[tuple[str, str, str]]:
+                only: list[str] | None = None, export=None) -> list[tuple[str, str, str]]:
     try:
         resolved = job.read_json(job.clips_resolved)
     except json.JSONDecodeError as exc:
@@ -48,5 +48,11 @@ def enqueue_job(job: Job, root: Path, repo: str, *, upload=clips_repo.upload_ass
             except OSError as exc:
                 rows.append((cid, title, f"failed: could not write the queue entry ({type(exc).__name__})"))
                 continue
+            if export is not None:
+                try:
+                    export(entry, video)
+                except OSError as exc:
+                    rows.append((cid, title, f"queued (local copy failed: {type(exc).__name__})"))
+                    continue
             rows.append((cid, title, "queued"))
     return rows
