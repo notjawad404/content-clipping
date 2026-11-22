@@ -2,6 +2,51 @@
 
 Clips already on YouTube, newest first. Upload each in TikTok Studio and paste its caption. Download links work for 7 days after a clip is listed.
 
+### The bachelor party dive trip is already a mess 😂 #GTA6
+
+[Download _ImWJKj14X4_clip_13.mp4](https://github.com/notjawad404/content-clipping/releases/download/v-_ImWJKj14X4/clip_13.mp4)
+
+```
+The GTA 6 bachelor party dive trip is already a mess 😂 'We might find a new kind of whale.'
+#GTA6 #GTAVI #GTA6Gameplay #gaming #fyp
+```
+
+### 'Can I speak to your manager?' Deal OFF 😤 #GTA6
+
+[Download _ImWJKj14X4_clip_12.mp4](https://github.com/notjawad404/content-clipping/releases/download/v-_ImWJKj14X4/clip_12.mp4)
+
+```
+'You can ask to speak to my manager?' 😤 Brian and Arnold's deal is OFF.
+#GTA6 #GTAVI #GTA6Gameplay #gaming #fyp
+```
+
+### Cal explains ghosting to Brian and it goes badly 😂 #GTA6
+
+[Download _ImWJKj14X4_clip_11.mp4](https://github.com/notjawad404/content-clipping/releases/download/v-_ImWJKj14X4/clip_11.mp4)
+
+```
+Cal explaining ghosting to Brian is peak comedy 😂
+#GTA6 #GTAVI #GTA6Gameplay #gaming #fyp
+```
+
+### Cal lost 20 pounds of weed to the cops 💀 #GTA6
+
+[Download _ImWJKj14X4_clip_10.mp4](https://github.com/notjawad404/content-clipping/releases/download/v-_ImWJKj14X4/clip_10.mp4)
+
+```
+Cal lost 20 pounds of weed to the cops 💀 Jason's answer: fine.
+#GTA6 #GTAVI #GTA6Gameplay #gaming #fyp
+```
+
+### Mandy's sink is NOT broken by accident 👀 #GTA6
+
+[Download _ImWJKj14X4_clip_09.mp4](https://github.com/notjawad404/content-clipping/releases/download/v-_ImWJKj14X4/clip_09.mp4)
+
+```
+Mandy will break any appliance to see Jason 👀 Technically a sink is a fixture.
+#GTA6 #GTAVI #GTA6Gameplay #gaming #fyp
+```
+
 ### Cal realises GTA 6 crime isn't what he signed up for
 
 [Download _ImWJKj14X4_clip_08.mp4](https://github.com/notjawad404/content-clipping/releases/download/v-_ImWJKj14X4/clip_08.mp4)
