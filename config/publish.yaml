@@ -6,7 +6,7 @@ queue_branch: master                        # the branch the cron reads; queuein
 youtube: true                               # also post each clip to YouTube Shorts
 youtube_privacy: private                    # set to public once the YouTube API audit passes
 tiktok: true
-tiktok_mode: manual                         # manual: listed in queue/tiktok.md for TikTok Studio; draft: TikTok
+tiktok_mode: draft                           # manual: listed in queue/tiktok.md for TikTok Studio; draft: TikTok
                                             # inbox (mobile app only); direct: posted. draft/direct need TT_* secrets
 tiktok_keep_days: 7                         # manual: download links stay up this long
 tiktok_privacy: SELF_ONLY                   # direct mode only; unaudited apps can only post privately

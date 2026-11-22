@@ -39,10 +39,9 @@
     "gaming shorts"
   ],
   "tiktok": {
-    "video_id": "manual",
-    "url": "https://github.com/notjawad404/content-clipping/releases/download/v-_ImWJKj14X4/clip_09.mp4",
+    "video_id": null,
+    "url": null,
     "attempts": 0,
-    "last_error": null,
-    "sent_at": "2026-11-22T15:46:30Z"
+    "last_error": null
   }
 }
