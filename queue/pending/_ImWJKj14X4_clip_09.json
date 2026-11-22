@@ -14,8 +14,8 @@
   "media_id": null,
   "permalink": null,
   "youtube": {
-    "video_id": null,
-    "url": null,
+    "video_id": "Jzf_0YpHBjA",
+    "url": "https://www.youtube.com/shorts/Jzf_0YpHBjA",
     "attempts": 0,
     "last_error": null
   },
@@ -37,5 +37,11 @@
     "Rockstar Games",
     "GTA 6 playthrough",
     "gaming shorts"
-  ]
+  ],
+  "tiktok": {
+    "video_id": null,
+    "url": null,
+    "attempts": 0,
+    "last_error": null
+  }
 }
