@@ -2,13 +2,17 @@ name: post-next
 
 on:
   schedule:
-    - cron: "41 11 * * *"   # ~6:40 AM ET: the day's clips go up private, to be scheduled in YouTube Studio
+    - cron: "0 10 * * *"    # 3:00 PM Pakistan time (UTC+5): the day's clips go up private, to be scheduled in YouTube Studio
   workflow_dispatch:
     inputs:
       dry_run:
         description: "Check credentials and the next queued clip, but do not publish"
         type: boolean
         default: true
+      count:
+        description: "How many queued clips to post"
+        type: number
+        default: 3
 
 concurrency:
   group: ig-post
@@ -32,7 +36,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      - name: Post the next queued clips (up to 5)
+      - name: Post the next queued clips (3 a day)
         env:
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           GH_TOKEN: ${{ secrets.CLIPS_REPO_TOKEN || github.token }}
@@ -42,12 +46,13 @@ jobs:
           TT_CLIENT_KEY: ${{ secrets.TT_CLIENT_KEY }}
           TT_CLIENT_SECRET: ${{ secrets.TT_CLIENT_SECRET }}
           TT_REFRESH_TOKEN: ${{ secrets.TT_REFRESH_TOKEN }}
+          COUNT: ${{ inputs.count || 3 }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: |
           if [ "$DRY_RUN" = "true" ]; then
             python -m clipper.publish.post_next --dry-run
           else
-            for i in 1 2 3 4 5; do
+            for i in $(seq 1 "$COUNT"); do
               ls queue/pending/*.json >/dev/null 2>&1 || break
               python -m clipper.publish.post_next
             done

@@ -46,7 +46,9 @@ def test_post_next_workflow_wiring_of_secrets_and_dry_run():
     assert script.split("else")[0].count("--dry-run") == 1
 
 
-def test_post_next_runs_once_a_day_for_five_clips():
-    schedule = triggers(load())["schedule"]
-    assert schedule == [{"cron": "41 11 * * *"}]
-    assert "for i in 1 2 3 4 5; do" in WORKFLOW.read_text()
+def test_post_next_runs_once_a_day_for_three_clips():
+    doc = load()
+    assert triggers(doc)["schedule"] == [{"cron": "0 10 * * *"}]
+    assert triggers(doc)["workflow_dispatch"]["inputs"]["count"]["default"] == 3
+    assert doc["jobs"]["post"]["steps"][-1]["env"]["COUNT"] == "${{ inputs.count || 3 }}"
+    assert 'for i in $(seq 1 "$COUNT"); do' in WORKFLOW.read_text()
