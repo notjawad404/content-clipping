@@ -12,7 +12,8 @@ DEFAULT_PATH = CONFIG_DIR / "publish.yaml"
 REQUIRED = ("clips_repo",)
 DEFAULTS = {"graph_version": "v26.0", "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300,
             "youtube": False, "youtube_privacy": "private", "tiktok": False, "tiktok_privacy": "SELF_ONLY",
-            "tiktok_mode": "draft", "tiktok_keep_days": 7, "instagram_backlog": []}
+            "tiktok_mode": "draft", "tiktok_keep_days": 7, "instagram_backlog": [],
+            "publer": False, "publer_accounts": [], "publer_mode": "publish"}
 YOUTUBE_PRIVACY = ("private", "unlisted", "public")
 TIKTOK_PRIVACY = ("SELF_ONLY", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "PUBLIC_TO_EVERYONE")
 POSITIVE_INT_KEYS = ("max_attempts", "poll_interval_s", "poll_timeout_s", "tiktok_keep_days")
@@ -52,7 +53,7 @@ def load_publish_config(path: Path = DEFAULT_PATH) -> dict:
     for key in NON_EMPTY_STR_KEYS:
         if not _is_non_empty_str(cfg[key]):
             raise PublishConfigError(f"{path.name}: {key} must be a non-empty string")
-    for key in ("youtube", "tiktok"):
+    for key in ("youtube", "tiktok", "publer"):
         if not isinstance(cfg[key], bool):
             raise PublishConfigError(f"{path.name}: {key} must be true or false")
     if cfg["youtube_privacy"] not in YOUTUBE_PRIVACY:
@@ -61,6 +62,14 @@ def load_publish_config(path: Path = DEFAULT_PATH) -> dict:
         raise PublishConfigError(f"{path.name}: tiktok_mode must be manual, draft or direct")
     if cfg["tiktok_privacy"] not in TIKTOK_PRIVACY:
         raise PublishConfigError(f"{path.name}: tiktok_privacy must be one of {', '.join(TIKTOK_PRIVACY)}")
+    if cfg["publer_mode"] not in ("publish", "draft"):
+        raise PublishConfigError(f"{path.name}: publer_mode must be publish or draft")
+    accounts = cfg["publer_accounts"]
+    if not isinstance(accounts, list) or not all(_is_non_empty_str(a) or _is_int(a) for a in accounts):
+        raise PublishConfigError(f"{path.name}: publer_accounts must be a list of Publer account ids")
+    cfg["publer_accounts"] = [str(a) for a in accounts]
+    if cfg["publer"] and not cfg["publer_accounts"]:
+        raise PublishConfigError(f"{path.name}: publer is on but publer_accounts is empty")
     account = cfg.get("ig_account_id")
     if account is None:
         cfg["ig_account_id"] = None
@@ -71,6 +80,6 @@ def load_publish_config(path: Path = DEFAULT_PATH) -> dict:
     backlog = cfg["instagram_backlog"]
     if not isinstance(backlog, list) or not all(_is_non_empty_str(v) for v in backlog):
         raise PublishConfigError(f"{path.name}: instagram_backlog must be a list of video ids")
-    if cfg["ig_account_id"] is None and not cfg["youtube"] and not cfg["tiktok"]:
-        raise PublishConfigError(f"{path.name}: no platform enabled; set ig_account_id, youtube: true or tiktok: true")
+    if cfg["ig_account_id"] is None and not cfg["youtube"] and not cfg["tiktok"] and not cfg["publer"]:
+        raise PublishConfigError(f"{path.name}: no platform enabled; set ig_account_id, youtube, tiktok or publer")
     return cfg

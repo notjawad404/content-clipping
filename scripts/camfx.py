@@ -4,7 +4,7 @@ Streams raw BGRA frames to ffmpeg on 127.0.0.1:<port> and reconnects when ffmpeg
 Reads "on" / "off" / "delay <seconds>" / "zoom <factor>" lines on stdin to switch between the camera and the placeholder; if the
 camera cannot be opened or stops sending frames, the placeholder is shown instead.
 Camera frames are held back by --delay seconds so you line up with the relayed gameplay.
-    --bg white | blur | none | #RRGGBB | path/to/image.jpg     (none = just you cut out, no box)
+    --bg white | blur | none | #RRGGBB | path/to/image.jpg | path/to/loop.mp4     (none = just you cut out, no box)
 
 Needs: uv run --with mediapipe --with opencv-python, and models/selfie_segmenter.tflite.
 """
@@ -28,6 +28,7 @@ from mediapipe.tasks.python import BaseOptions, vision
 ROOT = Path(__file__).resolve().parent.parent
 MODEL = ROOT / "models" / "selfie_segmenter.tflite"
 DEFAULT_PLACEHOLDER = ROOT / "assets" / "branding" / "cam_placeholder.png"
+VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".gif"}
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/image_segmenter/"
              "selfie_segmenter/float16/latest/selfie_segmenter.tflite")
 
@@ -95,6 +96,38 @@ def _placeholder(path: str | None, size: tuple[int, int]) -> np.ndarray:
     return cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
 
 
+class LoopVideo:
+    """Background video played in real time and looped, one frame per call."""
+
+    def __init__(self, path: str, size: tuple[int, int]):
+        self.cap = cv2.VideoCapture(path)
+        ok, frame = self.cap.read()
+        if not ok:
+            raise SystemExit(f"Cannot read background video {path!r}")
+        self.size = size
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30
+        self.frame = _cover(frame, size)
+        self.pos = 1
+        self.t0 = time.monotonic()
+
+    def read(self) -> np.ndarray:
+        target = int((time.monotonic() - self.t0) * self.fps)
+        if target < self.pos:
+            return self.frame
+        while self.pos < target:
+            if not self.cap.grab():
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                self.t0 = time.monotonic()
+                self.pos = 0
+                break
+            self.pos += 1
+        ok, frame = self.cap.read()
+        if ok:
+            self.pos += 1
+            self.frame = _cover(frame, self.size)
+        return self.frame
+
+
 class Matte:
     def __init__(self, bg: str, size: tuple[int, int], every: int = 2):
         if not MODEL.exists():
@@ -104,8 +137,8 @@ class Matte:
             running_mode=vision.RunningMode.VIDEO, output_confidence_masks=True))
         colors = {"white": "#ffffff", "black": "#000000", "green": "#00b140"}
         bg = colors.get(bg.lower(), bg)
-        self.mode = bg if bg in ("blur", "none") else "color" if re.fullmatch(r"#[0-9a-fA-F]{6}", bg) else "image"
-        self.image = None
+        self.mode = bg if bg in ("blur", "none") else "color" if re.fullmatch(r"#[0-9a-fA-F]{6}", bg) else             "video" if Path(bg).suffix.lower() in VIDEO_EXTS else "image"
+        self.image = self.video = None
         if self.mode == "color":
             r, g, b = (int(bg[i:i + 2], 16) for i in (1, 3, 5))
             self.image = np.full((size[1], size[0], 3), (b, g, r), np.uint8)
@@ -114,6 +147,8 @@ class Matte:
             if img is None:
                 raise SystemExit(f"Cannot read background image {bg!r}")
             self.image = _cover(img, size)
+        elif self.mode == "video":
+            self.video = LoopVideo(bg, size)
         self.prev = None
         self.every = max(every, 1)
         self.n = 0
@@ -132,7 +167,10 @@ class Matte:
             out = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
             out[..., 3] = (self.prev * 255).astype(np.uint8)
             return out
-        back = cv2.GaussianBlur(frame, (0, 0), 15) if self.mode == "blur" else self.image
+        if self.mode == "blur":
+            back = cv2.GaussianBlur(frame, (0, 0), 15)
+        else:
+            back = self.video.read() if self.video else self.image
         mixed = (frame * alpha + back * (1 - alpha)).astype(np.uint8)
         return cv2.cvtColor(mixed, cv2.COLOR_BGR2BGRA)
 
@@ -204,12 +242,10 @@ def main() -> None:
                 time.sleep(0.05)
                 continue
             misses = 0
+            taken = time.monotonic()
             out = matte.apply(_cover(_zoom(frame, args.zoom), (w, h)))
-            now = time.monotonic()
             with lock:
-                buf.append((now, out))
-                while len(buf) > 1 and buf[1][0] <= now - args.delay:
-                    buf.popleft()
+                buf.append((taken, out))
 
     threading.Thread(target=control, daemon=True).start()
     threading.Thread(target=capture, daemon=True).start()
@@ -227,6 +263,8 @@ def main() -> None:
             while True:
                 now = time.monotonic()
                 with lock:
+                    while len(buf) > 1 and buf[1][0] <= now - args.delay:
+                        buf.popleft()
                     fresh = buf and now - args.delay - 1 <= buf[0][0] <= now - args.delay
                     frame = buf[0][1] if fresh and want.is_set() else placeholder
                 sock.sendall(frame.tobytes())

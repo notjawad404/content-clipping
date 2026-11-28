@@ -60,6 +60,20 @@ def test_upload_sends_init_then_one_chunk():
     assert method == "PUT" and headers["Content-Range"] == "bytes 0-9/10" and body == b"x" * 10
 
 
+def test_upload_passes_interaction_and_disclosure_settings():
+    http = FakeHttp()
+    client(http).upload(b"x", "c", "PUBLIC_TO_EVERYONE", allow_comment=False, allow_duet=True,
+                        allow_stitch=False, brand_organic=True, brand_content=True)
+    info = json.loads(http.calls[1][3])["post_info"]
+    assert (info["disable_comment"], info["disable_duet"], info["disable_stitch"]) == (True, False, True)
+    assert info["brand_organic_toggle"] and info["brand_content_toggle"]
+
+
+def test_branded_content_cannot_be_private():
+    with pytest.raises(ApiError, match="SELF_ONLY"):
+        client(FakeHttp()).upload(b"x", "c", "SELF_ONLY", brand_content=True)
+
+
 def test_token_and_quota_errors_are_mapped():
     with pytest.raises(TokenInvalid):
         client(FakeHttp(token_status=400)).access_token()

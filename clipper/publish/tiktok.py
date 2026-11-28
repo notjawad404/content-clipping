@@ -118,22 +118,31 @@ class TikTokClient:
                 raise _map_error(status, _json(raw))
         return str(publish_id)
 
-    def upload(self, video: bytes, caption: str, privacy: str) -> str:
+    def upload(self, video: bytes, caption: str, privacy: str, *, allow_comment: bool = True,
+               allow_duet: bool = True, allow_stitch: bool = True, brand_organic: bool = False,
+               brand_content: bool = False) -> str:
         """Direct post; returns the publish id once every chunk is uploaded."""
+        if brand_content and privacy == "SELF_ONLY":
+            raise ApiError("branded content cannot be posted as SELF_ONLY", code="invalid_params")
         return self._send("/post/publish/video/init/", video, {"post_info": {
-            "title": caption[:2200], "privacy_level": privacy, "disable_duet": False, "disable_comment": False,
-            "disable_stitch": False, "video_cover_timestamp_ms": 1000}})
+            "title": caption[:2200], "privacy_level": privacy, "disable_comment": not allow_comment,
+            "disable_duet": not allow_duet, "disable_stitch": not allow_stitch,
+            "brand_organic_toggle": brand_organic, "brand_content_toggle": brand_content,
+            "video_cover_timestamp_ms": 1000}})
 
     def upload_draft(self, video: bytes) -> str:
         """Sends the video to the creator's TikTok inbox as a draft; the caption is added in the app."""
         return self._send("/post/publish/inbox/video/init/", video, {})
+
+    def status(self, publish_id: str) -> dict:
+        return self._call("/post/publish/status/fetch/", {"publish_id": publish_id})
 
     def wait(self, publish_id: str, interval_s: float, timeout_s: float,
              done: tuple[str, ...] = ("PUBLISH_COMPLETE",)) -> dict:
         """Poll until a `done` status (returns the status data); ApiError on FAILED or timeout."""
         waited = 0.0
         while True:
-            data = self._call("/post/publish/status/fetch/", {"publish_id": publish_id})
+            data = self.status(publish_id)
             status = data.get("status")
             if status in done:
                 return data

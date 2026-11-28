@@ -14,7 +14,18 @@ def test_defaults_are_applied(tmp_path):
     assert cfg == {"clips_repo": "me/clips", "ig_account_id": "123", "graph_version": "v26.0",
                    "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300,
                    "youtube": False, "youtube_privacy": "private", "tiktok": False, "tiktok_privacy": "SELF_ONLY",
-                   "tiktok_mode": "draft", "tiktok_keep_days": 7, "instagram_backlog": []}
+                   "tiktok_mode": "draft", "tiktok_keep_days": 7, "instagram_backlog": [], "publer": False,
+                   "publer_accounts": [], "publer_mode": "publish"}
+
+
+def test_publer_settings_are_validated(tmp_path):
+    cfg = load_publish_config(write(tmp_path, 'clips_repo: me/clips\npubler: true\npubler_accounts: [abc, 12]\n'))
+    assert cfg["publer"] is True and cfg["publer_accounts"] == ["abc", "12"]
+    with pytest.raises(PublishConfigError, match="publer_accounts is empty"):
+        load_publish_config(write(tmp_path, 'clips_repo: me/clips\npubler: true\n'))
+    with pytest.raises(PublishConfigError, match="publer_mode"):
+        load_publish_config(write(tmp_path, 'clips_repo: me/clips\npubler: true\npubler_accounts: [a]\n'
+                                            'publer_mode: later\n'))
 
 
 def test_tiktok_settings_are_validated(tmp_path):

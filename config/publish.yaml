@@ -11,6 +11,9 @@ tiktok_mode: direct                          # manual: listed in queue/tiktok.md
                                             # inbox (mobile app only); direct: posted. draft/direct need TT_* secrets
 tiktok_keep_days: 7                         # manual: download links stay up this long
 tiktok_privacy: SELF_ONLY                   # direct mode only; unaudited apps can only post privately
+publer: false                               # also post each clip through Publer (needs PUBLER_* secrets)
+publer_mode: publish                        # publish: goes live now; draft: lands in Publer as a draft
+publer_accounts: []                         # Publer account ids; list them with scripts/publer_accounts.py
 max_attempts: 3
 poll_interval_s: 10
 poll_timeout_s: 300

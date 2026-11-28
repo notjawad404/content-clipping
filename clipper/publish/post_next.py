@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import http.client
+import json
 import os
 import sys
 import urllib.request
@@ -10,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-from clipper.publish import PublishError, clips_repo, gitops, queue, tiktok
+from clipper.publish import PublishError, clips_repo, gitops, publer, queue, tiktok
 from clipper.env import PROJECT_ROOT
 from clipper.publish.config import load_publish_config
 from clipper.publish.instagram import IgError, InstagramClient, QuotaExceeded, TokenInvalid
@@ -22,6 +23,7 @@ DUPLICATE_WINDOW = timedelta(hours=24)
 SHORTS_TAG = "#Shorts"
 YT_ENV = ("YT_CLIENT_ID", "YT_CLIENT_SECRET", "YT_REFRESH_TOKEN")
 TT_ENV = ("TT_CLIENT_KEY", "TT_CLIENT_SECRET", "TT_REFRESH_TOKEN")
+PUBLER_ENV = ("PUBLER_API_KEY", "PUBLER_WORKSPACE_ID")
 
 
 def _short(caption: str) -> str:
@@ -162,7 +164,7 @@ def _finalize(root: Path, entry: dict, delete_asset: Callable[[int], object],
             log(f"warning: could not delete the release asset: {exc}")
     commit(f"queue: posted {entry['id']}")
     links = [entry.get("permalink") or entry.get("media_id")]
-    for key, name in (("youtube", "YouTube"), ("tiktok", "TikTok")):
+    for key, name in (("youtube", "YouTube"), ("tiktok", "TikTok"), ("publer", "Publer job")):
         state = entry.get(key) or {}
         if state.get("url") or state.get("video_id"):
             links.append(f"{name}: {state.get('url') or state['video_id']}")
@@ -365,6 +367,75 @@ class TikTokPoster:
         return publish_id, (f"https://www.tiktok.com/@{user}/video/{ids[0]}" if ids and user else None)
 
 
+def _publer_network(provider: str, entry: dict, media: list[dict], tiktok_privacy: str) -> dict:
+    caption = entry["caption"]
+    if provider == "youtube":
+        title = entry.get("title") or str(caption).splitlines()[0][:90]
+        return {"type": "short", "title": title[:100], "text": entry.get("youtube_description") or caption,
+                "media": media}
+    if provider == "tiktok":
+        return {"type": "video", "text": entry.get("tiktok_caption") or caption, "media": media,
+                "details": {"privacy": tiktok_privacy}}
+    if provider in ("instagram", "facebook"):
+        return {"type": "reel", "text": caption, "media": media, "details": {"type": "reel"}}
+    return {"type": "video", "text": caption, "media": media}
+
+
+class PublerPoster:
+    """Uploads a clip to Publer once and posts it to every configured account. Accounts that succeed are kept
+    in the entry's publer state, so a retry only posts to the ones that failed."""
+    key, name = "publer", "Publer"
+    token_invalid, quota, api_error = publer.TokenInvalid, publer.QuotaExceeded, publer.PbError
+    token_hint = "Create a new API key in Publer (Settings > Access & Login > API) and update PUBLER_API_KEY."
+
+    def __init__(self, client: publer.PublerClient, accounts: list[str], *, draft: bool = False,
+                 tiktok_privacy: str = "SELF_ONLY", interval_s: float = 10, timeout_s: float = 300,
+                 fetch: Callable[[dict], bytes] | None = None):
+        self._client = client
+        self._accounts = accounts
+        self._draft = draft
+        self._tiktok_privacy = tiktok_privacy
+        self._interval = interval_s
+        self._timeout = timeout_s
+        self._fetch = fetch or _local_or_download
+        self._providers: dict[str, str] | None = None
+
+    def _provider_map(self) -> dict[str, str]:
+        if self._providers is None:
+            known = {str(a.get("id")): str(a.get("provider")) for a in self._client.accounts()}
+            missing = [a for a in self._accounts if a not in known]
+            if missing:
+                raise publer.ApiError(f"accounts not in this Publer workspace: {', '.join(missing)}")
+            self._providers = {a: known[a] for a in self._accounts}
+        return self._providers
+
+    def check(self) -> None:
+        self._provider_map()
+
+    def post(self, entry: dict) -> tuple[str, str | None]:
+        state = entry[self.key]
+        done = state.setdefault("done", [])
+        providers = self._provider_map()
+        todo = [a for a in self._accounts if a not in done]
+        if todo:
+            media = [{"id": self._client.upload_video(self._fetch(entry), f"{entry['id']}.mp4"), "type": "video"}]
+            by_provider: dict[str, list[str]] = {}
+            for account in todo:
+                by_provider.setdefault(providers[account], []).append(account)
+            posts = [{"networks": {p: _publer_network(p, entry, media, self._tiktok_privacy)},
+                      "accounts": [{"id": a} for a in ids]} for p, ids in by_provider.items()]
+            job_id = self._client.create_posts(posts, draft=self._draft)
+            state["job_id"] = job_id
+            result = self._client.wait(job_id, self._interval, self._timeout)
+            failures = result.get("failures") if isinstance(result, dict) else None
+            text = json.dumps(failures) if failures else ""
+            failed = [a for a in todo if a in text] or (todo if failures else [])
+            done.extend(a for a in todo if a not in failed)
+            if failed:
+                raise publer.ApiError(f"failed for {', '.join(failed)}: {text[:300]}")
+        return state.get("job_id") or "done", None
+
+
 def _platform(root: Path, entry: dict, cfg: dict, poster, dry_run: bool, commit: Callable[[str], object],
               log: Callable[[str], None], where: str = "pending") -> int:
     state = entry.setdefault(poster.key, queue.new_platform_state())
@@ -464,12 +535,12 @@ def _post_both(root: Path, client, cfg: dict, entry: dict, delete_asset: Callabl
 def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], object], *, dry_run: bool = False,
               commit: Callable[[str], object] | None = None, now: datetime | None = None,
               log: Callable[[str], None] = print, youtube: YouTubePoster | None = None,
-              tiktok_later: bool = False, ig_later: bool = False) -> int:
+              tiktok_later: bool = False, publer: PublerPoster | None = None, ig_later: bool = False) -> int:
     """`tiktok_later`: mark the entry for a TikTok draft once it is posted, and keep its asset until then.
     `ig_later`: the same for Instagram, which posts on its own schedule (instagram_next)."""
     commit = commit or (lambda message: None)
     now = now or datetime.now(timezone.utc)
-    posters = [youtube] if youtube is not None else []
+    posters = [p for p in (youtube, publer) if p is not None]
     try:
         entry = queue.next_pending(root)
     except (PublishError, OSError, ValueError) as exc:
@@ -762,8 +833,16 @@ def main(argv: list[str] | None = None) -> int:
             if values is None:
                 return 2
             youtube = YouTubePoster(YouTubeClient(*values), cfg.get("youtube_privacy", "private"))
+        publer_poster = None
+        if cfg.get("publer"):
+            values = _env(PUBLER_ENV, "publer")
+            if values is None:
+                return 2
+            publer_poster = PublerPoster(publer.PublerClient(*values), cfg["publer_accounts"],
+                                         draft=cfg["publer_mode"] == "draft", tiktok_privacy=cfg["tiktok_privacy"],
+                                         interval_s=cfg["poll_interval_s"], timeout_s=cfg["poll_timeout_s"])
         code = post_next(queue.QUEUE_ROOT, None, cfg, delete, dry_run=args.dry_run, commit=commit,
-                         youtube=youtube, tiktok_later=bool(cfg.get("tiktok")),
+                         youtube=youtube, tiktok_later=bool(cfg.get("tiktok")), publer=publer_poster,
                          ig_later=bool(cfg.get("ig_account_id")))
         if args.dry_run and tt is not None:
             code = max(code, tiktok_drafts(queue.QUEUE_ROOT, cfg, tt, delete, dry_run=True))
