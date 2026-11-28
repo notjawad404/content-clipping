@@ -40,5 +40,6 @@
     "url": null,
     "attempts": 0,
     "last_error": null
-  }
+  },
+  "ig_waiting": true
 }

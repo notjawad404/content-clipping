@@ -264,7 +264,7 @@ def test_main_requires_the_token(monkeypatch, capsys):
     monkeypatch.delenv("IG_ACCESS_TOKEN", raising=False)
     monkeypatch.setattr(post_next_module, "load_publish_config",
                         lambda: {"ig_account_id": "1", "graph_version": "v26.0", "youtube": False})
-    assert post_next_module.main([]) == 2
+    assert post_next_module.main(["--instagram", "new"]) == 2
     assert "IG_ACCESS_TOKEN" in capsys.readouterr().out
 
 
@@ -571,3 +571,89 @@ def test_recent_duplicate_tolerates_a_missing_caption(tmp_path):
     recent = [{"id": "m-9", "timestamp": "2026-11-07T11:00:00+0000"}]
     client = FakeClient(status="FINISHED", recent=recent)
     assert run(tmp_path, client)[0] == 0 and "publish" in client.calls
+
+
+IG_CFG = {**CFG, "instagram_backlog": ["old"]}
+
+
+def ig_entry(tmp_path, state, video_id, clip_id, queued_at, **fields):
+    e = queue.new_entry(video_id=video_id, clip_id=clip_id, campaign=None, caption=CAPTION,
+                        asset_url="https://example.invalid/a.mp4", asset_id=hash(clip_id) % 1000,
+                        queued_at=queued_at)
+    e.update(fields)
+    queue.save(tmp_path, state, e)
+    return e
+
+
+def ig_run(tmp_path, client, slot):
+    deleted, commits = [], []
+    code = post_next_module.instagram_next(tmp_path, client, IG_CFG, deleted.append, slot=slot,
+                                           commit=commits.append, now=NOW, log=lambda message: None)
+    return code, deleted, commits
+
+
+def test_instagram_new_slot_takes_the_oldest_waiting_new_clip(tmp_path):
+    ig_entry(tmp_path, "posted", "new", "clip_02", "2026-11-07T09:00:00Z", ig_waiting=True)
+    ig_entry(tmp_path, "pending", "new", "clip_03", "2026-11-07T10:00:00Z")
+    ig_entry(tmp_path, "posted", "old", "clip_01", "2026-11-01T10:00:00Z", ig_waiting=True)
+    ig_entry(tmp_path, "posted", "new", "clip_01", "2026-11-07T08:00:00Z")
+    code, deleted, commits = ig_run(tmp_path, FakeClient(), "new")
+    assert code == 0
+    done = queue.load_all(tmp_path, "posted")
+    posted = next(e for e in done if e["id"] == "new_clip_02")
+    assert posted["media_id"] == "m-1" and "ig_waiting" not in posted and posted["asset_id"] is None
+    assert len(deleted) == 1 and commits[-1] == "queue: instagram published new_clip_02"
+    assert next(e for e in done if e["id"] == "old_clip_01")["ig_waiting"] is True
+
+
+def test_instagram_old_slot_takes_only_backlog_clips(tmp_path):
+    ig_entry(tmp_path, "pending", "new", "clip_01", "2026-11-07T08:00:00Z")
+    ig_entry(tmp_path, "posted", "old", "clip_05", "2026-11-01T10:00:00Z", ig_waiting=True)
+    assert ig_run(tmp_path, FakeClient(), "old")[0] == 0
+    assert queue.load_all(tmp_path, "posted")[0]["media_id"] == "m-1"
+    assert queue.load_all(tmp_path, "pending")[0]["media_id"] is None
+
+
+def test_instagram_on_a_pending_clip_keeps_it_pending_with_its_asset(tmp_path):
+    ig_entry(tmp_path, "pending", "new", "clip_01", "2026-11-07T08:00:00Z")
+    code, deleted, _ = ig_run(tmp_path, FakeClient(), "new")
+    assert code == 0 and deleted == []
+    assert queue.load_all(tmp_path, "pending")[0]["media_id"] == "m-1"
+
+
+def test_instagram_keeps_the_asset_while_tiktok_waits(tmp_path):
+    ig_entry(tmp_path, "posted", "new", "clip_01", "2026-11-07T08:00:00Z", ig_waiting=True,
+             tiktok=queue.new_platform_state())
+    code, deleted, _ = ig_run(tmp_path, FakeClient(), "new")
+    assert code == 0 and deleted == []
+
+
+def test_instagram_nothing_waiting(tmp_path):
+    ig_entry(tmp_path, "posted", "new", "clip_01", "2026-11-07T08:00:00Z")
+    client = FakeClient()
+    assert ig_run(tmp_path, client, "new")[0] == 0 and client.calls == []
+
+
+def test_instagram_failure_counts_and_gives_up_at_the_limit(tmp_path):
+    ig_entry(tmp_path, "posted", "new", "clip_01", "2026-11-07T08:00:00Z", ig_waiting=True, attempts=2)
+    client = FakeClient()
+    client.errors["create"] = ApiError("bad video")
+    code, deleted, _ = ig_run(tmp_path, client, "new")
+    entry = queue.load_all(tmp_path, "posted")[0]
+    assert code == 1 and entry["attempts"] == 3 and "ig_waiting" not in entry and len(deleted) == 1
+
+
+def test_main_run_marks_the_clip_for_instagram_and_keeps_its_asset(tmp_path):
+    setup(tmp_path)
+
+    class YT:
+        key, name = "youtube", "YouTube"
+        token_invalid = quota = api_error = ApiError
+        def post(self, entry):
+            return "yt-1", "https://youtube.com/shorts/yt-1"
+
+    deleted = []
+    code = post_next(tmp_path, None, CFG, deleted.append, now=NOW, log=lambda message: None,
+                     youtube=YT(), ig_later=True)
+    entry = queue.load_all(tmp_path, "posted")[0]
+    assert code == 0 and entry["ig_waiting"] is True and deleted == []

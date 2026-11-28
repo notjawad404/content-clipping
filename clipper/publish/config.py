@@ -12,7 +12,7 @@ DEFAULT_PATH = CONFIG_DIR / "publish.yaml"
 REQUIRED = ("clips_repo",)
 DEFAULTS = {"graph_version": "v26.0", "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300,
             "youtube": False, "youtube_privacy": "private", "tiktok": False, "tiktok_privacy": "SELF_ONLY",
-            "tiktok_mode": "draft", "tiktok_keep_days": 7}
+            "tiktok_mode": "draft", "tiktok_keep_days": 7, "instagram_backlog": []}
 YOUTUBE_PRIVACY = ("private", "unlisted", "public")
 TIKTOK_PRIVACY = ("SELF_ONLY", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "PUBLIC_TO_EVERYONE")
 POSITIVE_INT_KEYS = ("max_attempts", "poll_interval_s", "poll_timeout_s", "tiktok_keep_days")
@@ -68,6 +68,9 @@ def load_publish_config(path: Path = DEFAULT_PATH) -> dict:
         cfg["ig_account_id"] = str(account)
     elif not _is_non_empty_str(account):
         raise PublishConfigError(f"{path.name}: ig_account_id must be a non-empty string or an integer")
+    backlog = cfg["instagram_backlog"]
+    if not isinstance(backlog, list) or not all(_is_non_empty_str(v) for v in backlog):
+        raise PublishConfigError(f"{path.name}: instagram_backlog must be a list of video ids")
     if cfg["ig_account_id"] is None and not cfg["youtube"] and not cfg["tiktok"]:
         raise PublishConfigError(f"{path.name}: no platform enabled; set ig_account_id, youtube: true or tiktok: true")
     return cfg

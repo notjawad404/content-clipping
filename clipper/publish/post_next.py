@@ -86,23 +86,23 @@ def _recent_duplicate(client, caption: str, now: datetime) -> dict | None:
 
 
 def _record_duplicate(root: Path, entry: dict, duplicate: dict, commit: Callable[[str], object],
-                      log: Callable[[str], None]) -> None:
+                      log: Callable[[str], None], where: str = "pending") -> None:
     log("found an identical recent post; recording it instead of publishing again")
     entry["media_id"] = str(duplicate["id"])
     entry["permalink"] = duplicate.get("permalink")
-    queue.save(root, "pending", entry)
+    queue.save(root, where, entry)
     commit(f"queue: published {entry['id']}")
 
 
 def _publish(root: Path, client, cfg: dict, entry: dict, dry_run: bool, commit: Callable[[str], object],
-             now: datetime, log: Callable[[str], None]) -> bool:
+             now: datetime, log: Callable[[str], None], where: str = "pending") -> bool:
     """Create/reuse the container and publish. Returns False for a dry run (nothing published)."""
     is_retry = bool(entry.get("container_id"))
     if is_retry and not dry_run:
         # A previous run may have published and then failed to commit: look before touching any container.
         duplicate = _outside_the_clip(_recent_duplicate, client, entry["caption"], now)
         if duplicate:
-            _record_duplicate(root, entry, duplicate, commit, log)
+            _record_duplicate(root, entry, duplicate, commit, log, where)
             return True
     container = entry.get("container_id")
     if container:
@@ -116,7 +116,7 @@ def _publish(root: Path, client, cfg: dict, entry: dict, dry_run: bool, commit: 
         container = client.create_reel_container(entry["asset_url"], entry["caption"])
         if not dry_run:
             entry["container_id"] = container
-            queue.save(root, "pending", entry)
+            queue.save(root, where, entry)
             commit(f"queue: container for {entry['id']}")
     client.wait_until_finished(container, cfg["poll_interval_s"], cfg["poll_timeout_s"])
     if dry_run:
@@ -125,14 +125,14 @@ def _publish(root: Path, client, cfg: dict, entry: dict, dry_run: bool, commit: 
     # Second chance: a post may have appeared while the container was processing.
     duplicate = _recent_duplicate(client, entry["caption"], now) if is_retry else None
     if duplicate:
-        _record_duplicate(root, entry, duplicate, commit, log)
+        _record_duplicate(root, entry, duplicate, commit, log, where)
         return True
     entry["media_id"] = client.publish(container)
     try:
         entry["permalink"] = client.permalink(entry["media_id"])
     except IgError:
         entry["permalink"] = None
-    queue.save(root, "pending", entry)
+    queue.save(root, where, entry)
     commit(f"queue: published {entry['id']}")
     return True
 
@@ -155,7 +155,7 @@ def _finalize(root: Path, entry: dict, delete_asset: Callable[[int], object],
               commit: Callable[[str], object], log: Callable[[str], None]) -> None:
     queue.move(root, entry, "pending", "posted")
     tiktok_waiting = "tiktok" in entry and not entry["tiktok"]["video_id"]
-    if entry.get("asset_id") is not None and not tiktok_waiting:
+    if entry.get("asset_id") is not None and not tiktok_waiting and not entry.get("ig_waiting"):
         try:
             delete_asset(entry["asset_id"])
         except PublishError as exc:
@@ -464,8 +464,9 @@ def _post_both(root: Path, client, cfg: dict, entry: dict, delete_asset: Callabl
 def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], object], *, dry_run: bool = False,
               commit: Callable[[str], object] | None = None, now: datetime | None = None,
               log: Callable[[str], None] = print, youtube: YouTubePoster | None = None,
-              tiktok_later: bool = False) -> int:
-    """`tiktok_later`: mark the entry for a TikTok draft once it is posted, and keep its asset until then."""
+              tiktok_later: bool = False, ig_later: bool = False) -> int:
+    """`tiktok_later`: mark the entry for a TikTok draft once it is posted, and keep its asset until then.
+    `ig_later`: the same for Instagram, which posts on its own schedule (instagram_next)."""
     commit = commit or (lambda message: None)
     now = now or datetime.now(timezone.utc)
     posters = [youtube] if youtube is not None else []
@@ -482,6 +483,8 @@ def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], objec
     log(f"next: {entry['id']} ({_short(entry['caption'])})")
     if tiktok_later:
         entry.setdefault("tiktok", queue.new_platform_state())
+    if ig_later and not entry.get("media_id") and entry["attempts"] < cfg["max_attempts"]:
+        entry["ig_waiting"] = True
     if client is None:
         if not posters:
             log("error: no platform configured")
@@ -490,6 +493,96 @@ def post_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], objec
     if posters:
         return _post_both(root, client, cfg, entry, delete_asset, posters, dry_run, commit, now, log)
     return _instagram(root, client, cfg, entry, delete_asset, dry_run, commit, now, log)
+
+
+def _ig_candidates(root: Path, cfg: dict, slot: str) -> list[tuple[str, dict]]:
+    """Clips still waiting for Instagram, oldest first. The "old" slot takes only instagram_backlog videos."""
+    backlog = set(cfg.get("instagram_backlog") or [])
+    found = [("pending", e) for e in queue.load_all(root, "pending")
+             if not e.get("media_id") and not _is_stale_duplicate(root, e)]
+    found += [("posted", e) for e in queue.load_all(root, "posted") if e.get("ig_waiting")]
+    found = [(w, e) for w, e in found if e["attempts"] < cfg["max_attempts"] and e.get("asset_url")
+             and (e["video_id"] in backlog) == (slot == "old")]
+    return sorted(found, key=lambda pair: (pair[1]["queued_at"], pair[1]["id"]))
+
+
+def _ig_done(root: Path, entry: dict, where: str, delete_asset: Callable[[int], object],
+             log: Callable[[str], None]) -> None:
+    entry.pop("ig_waiting", None)
+    tiktok_waiting = "tiktok" in entry and not entry["tiktok"]["video_id"]
+    if where == "posted" and entry.get("asset_id") is not None and not tiktok_waiting:
+        try:
+            delete_asset(entry["asset_id"])
+            entry["asset_id"] = None
+        except PublishError as exc:
+            log(f"warning: could not delete the release asset: {exc}")
+    queue.save(root, where, entry)
+
+
+def instagram_next(root: Path, client, cfg: dict, delete_asset: Callable[[int], object], *, slot: str = "new",
+                   dry_run: bool = False, commit: Callable[[str], object] | None = None,
+                   now: datetime | None = None, log: Callable[[str], None] = print) -> int:
+    """Post one clip to Instagram: the oldest new clip, or with slot="old" the oldest backlog clip."""
+    commit = commit or (lambda message: None)
+    now = now or datetime.now(timezone.utc)
+    try:
+        candidates = _ig_candidates(root, cfg, slot)
+    except (PublishError, OSError, ValueError) as exc:
+        log(f"error: could not read the queue: {exc}")
+        return 1
+    if not candidates:
+        log(f"Instagram ({slot}): nothing waiting")
+        return 0
+    where, entry = candidates[0]
+    log(f"Instagram ({slot}) next: {entry['id']} ({_short(entry['caption'])})")
+    try:
+        used, total = _outside_the_clip(client.publishing_limit)
+        if used >= total:
+            log(f"publishing quota reached ({used}/{total}); will retry on the next run")
+            return 0
+        if not _publish(root, client, cfg, entry, dry_run, commit, now, log, where):
+            return 0
+        _ig_done(root, entry, where, delete_asset, log)
+        commit(f"queue: instagram published {entry['id']}")
+        log(f"posted {entry['id']} to Instagram: {entry.get('permalink') or entry['media_id']}")
+    except _NotTheClipsFault as exc:
+        log(f"error: {exc}")
+        return 1
+    except _AlreadyPublished:
+        log(f"{entry['id']}: {MANUAL_CHECK_ERROR}")
+        if not dry_run:
+            entry["last_error"] = MANUAL_CHECK_ERROR
+            entry["attempts"] = cfg["max_attempts"]
+            _ig_done(root, entry, where, lambda asset_id: None, log)
+            commit(f"queue: needs a manual check: {entry['id']}")
+        return 1
+    except TokenInvalid as exc:
+        log(f"error: Instagram rejected the access token ({exc}). "
+            "Generate a new one and update the IG_ACCESS_TOKEN secret.")
+        return 1
+    except QuotaExceeded:
+        log("publishing quota reached; will retry on the next run")
+        return 0
+    except IgError as exc:
+        if dry_run:
+            log(f"dry run failed: {exc}")
+            return 1
+        entry["attempts"] += 1
+        entry["last_error"] = str(exc)
+        if entry["attempts"] >= cfg["max_attempts"]:
+            _ig_done(root, entry, where, delete_asset, log)
+        else:
+            queue.save(root, where, entry)
+        log(f"error: {exc} (attempt {entry['attempts']}/{cfg['max_attempts']})")
+        try:
+            commit(f"queue: instagram attempt {entry['attempts']} failed for {entry['id']}")
+        except PublishError as commit_exc:
+            log(f"error: could not commit the failure record: {commit_exc}")
+        return 1
+    except (PublishError, OSError) as exc:
+        log(f"error: {exc}")
+        return 1
+    return 0
 
 
 def tiktok_drafts(root: Path, cfg: dict, poster: TikTokPoster, delete_asset: Callable[[int], object], *,
@@ -527,7 +620,7 @@ def tiktok_drafts(root: Path, cfg: dict, poster: TikTokPoster, delete_asset: Cal
             summary(f"### {entry['id']}\n\n{entry.get('title') or ''}\n\n```\n{caption}\n```\n")
         elif state["attempts"] < cfg["max_attempts"]:
             break  # posting limit or a fresh failure: try again on the next run
-        if entry.get("asset_id") is not None:
+        if entry.get("asset_id") is not None and not entry.get("ig_waiting"):
             try:
                 delete_asset(entry["asset_id"])
             except PublishError as exc:
@@ -570,7 +663,8 @@ def tiktok_handoff(root: Path, cfg: dict, delete_asset: Callable[[int], object],
         for entry in marked:
             state = entry["tiktok"]
             sent = datetime.strptime(state.get("sent_at") or stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-            if state["video_id"] == "manual" and entry.get("asset_id") is not None and sent < cutoff:
+            if (state["video_id"] == "manual" and entry.get("asset_id") is not None and sent < cutoff
+                    and not entry.get("ig_waiting")):
                 try:
                     delete_asset(entry["asset_id"])
                 except PublishError as exc:
@@ -624,6 +718,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ids", help="with --tiktok-drafts: comma-separated posted clip ids to send")
     parser.add_argument("--limit", type=int, default=5, help="with --tiktok-drafts: most clips to send")
     parser.add_argument("--no-commit", action="store_true", help="update queue files without committing")
+    parser.add_argument("--instagram", choices=("new", "old"), help="post one clip to Instagram instead")
     args = parser.parse_args(argv)
     if args.tiktok_drafts:
         _load_dotenv()
@@ -650,21 +745,26 @@ def main(argv: list[str] | None = None) -> int:
             return tiktok_drafts(queue.QUEUE_ROOT, cfg, tt, delete, dry_run=args.dry_run, commit=commit,
                                  summary=_step_summary, limit=args.limit,
                                  ids=args.ids.split(",") if args.ids else None)
-        client = None
-        if cfg.get("ig_account_id"):
+        if args.instagram:
+            if not cfg.get("ig_account_id"):
+                print("Instagram is off in config/publish.yaml; nothing to do")
+                return 0
             token = os.environ.get("IG_ACCESS_TOKEN")
             if not token:
                 print("error: the IG_ACCESS_TOKEN environment variable is not set")
                 return 2
             client = InstagramClient(token, cfg["ig_account_id"], cfg["graph_version"])
+            return instagram_next(queue.QUEUE_ROOT, client, cfg, delete, slot=args.instagram,
+                                  dry_run=args.dry_run, commit=commit)
         youtube = None
         if cfg.get("youtube"):
             values = _env(YT_ENV, "youtube")
             if values is None:
                 return 2
             youtube = YouTubePoster(YouTubeClient(*values), cfg.get("youtube_privacy", "private"))
-        code = post_next(queue.QUEUE_ROOT, client, cfg, delete, dry_run=args.dry_run, commit=commit,
-                         youtube=youtube, tiktok_later=bool(cfg.get("tiktok")))
+        code = post_next(queue.QUEUE_ROOT, None, cfg, delete, dry_run=args.dry_run, commit=commit,
+                         youtube=youtube, tiktok_later=bool(cfg.get("tiktok")),
+                         ig_later=bool(cfg.get("ig_account_id")))
         if args.dry_run and tt is not None:
             code = max(code, tiktok_drafts(queue.QUEUE_ROOT, cfg, tt, delete, dry_run=True))
         elif args.dry_run and cfg.get("tiktok") and manual:

@@ -14,7 +14,7 @@ def test_defaults_are_applied(tmp_path):
     assert cfg == {"clips_repo": "me/clips", "ig_account_id": "123", "graph_version": "v26.0",
                    "queue_branch": "master", "max_attempts": 3, "poll_interval_s": 10, "poll_timeout_s": 300,
                    "youtube": False, "youtube_privacy": "private", "tiktok": False, "tiktok_privacy": "SELF_ONLY",
-                   "tiktok_mode": "draft", "tiktok_keep_days": 7}
+                   "tiktok_mode": "draft", "tiktok_keep_days": 7, "instagram_backlog": []}
 
 
 def test_tiktok_settings_are_validated(tmp_path):
@@ -50,7 +50,8 @@ def test_missing_required_key_names_the_key(tmp_path):
 def test_the_shipped_config_is_valid():
     cfg = load_publish_config()
     assert cfg["clips_repo"] == "notjawad404/content-clipping"
-    assert cfg["ig_account_id"] is None and cfg["youtube"] is True
+    assert cfg["ig_account_id"] == "17841417816087015" and cfg["youtube"] is True
+    assert cfg["instagram_backlog"] == ["_ImWJKj14X4"]
     assert cfg["queue_branch"] == "master"
 
 
