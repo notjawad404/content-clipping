@@ -726,7 +726,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_publish_config()
         tt = None
         manual = cfg.get("tiktok_mode") == "manual"
-        if cfg.get("tiktok") and not manual and (args.tiktok_drafts or args.dry_run):
+        if cfg.get("tiktok") and not manual and not args.instagram and (args.tiktok_drafts or args.dry_run):
             values = _env(TT_ENV, "tiktok")
             if values is None:
                 return 2
