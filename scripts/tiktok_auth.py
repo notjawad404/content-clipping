@@ -3,8 +3,8 @@
 Run on your own machine (it opens a browser):
     python scripts/tiktok_auth.py
 
-Needs TT_CLIENT_KEY and TT_CLIENT_SECRET in .env, and the Desktop redirect URI below registered in the
-TikTok app's Login Kit settings. Sign in as the TikTok account the clips should be posted to.
+Needs TT_CLIENT_KEY and TT_CLIENT_SECRET in .env, and the redirect URI registered in the TikTok app's Login Kit
+settings: the Desktop one below, or TT_REDIRECT_URI (an https page that forwards to it, e.g. site/callback/). Sign in as the TikTok account the clips should be posted to.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ENV = ROOT / ".env"
 PORT = 8723
-REDIRECT_URI = f"http://localhost:{PORT}/callback/"
+LOCAL_REDIRECT = f"http://localhost:{PORT}/callback/"
 AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
 TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
 SCOPES = "user.info.basic,video.upload,video.publish"
@@ -77,15 +77,17 @@ def main() -> int:
         print(f"error: set TT_CLIENT_KEY and TT_CLIENT_SECRET in {ENV}")
         return 2
     state = secrets.token_urlsafe(16)
+    redirect = env.get("TT_REDIRECT_URI") or LOCAL_REDIRECT
     verifier, challenge = _pkce()
+    pkce = {"code_challenge": challenge, "code_challenge_method": "S256"} if redirect == LOCAL_REDIRECT else {}
     try:
         server, result = _server(state)
     except OSError as exc:
         print(f"error: cannot listen on port {PORT}: {exc}")
         return 2
     url = AUTH_URL + "?" + urllib.parse.urlencode({
-        "client_key": key, "scope": SCOPES, "response_type": "code", "redirect_uri": REDIRECT_URI,
-        "state": state, "code_challenge": challenge, "code_challenge_method": "S256"})
+        "client_key": key, "scope": SCOPES, "response_type": "code", "redirect_uri": redirect,
+        "state": state, **pkce})
     print("Opening your browser. If it does not open, visit:\n" + url + "\n")
     webbrowser.open(url)
     thread = threading.Thread(target=server.handle_request)
@@ -98,7 +100,7 @@ def main() -> int:
 
     body = urllib.parse.urlencode({
         "client_key": key, "client_secret": secret, "code": result["code"], "grant_type": "authorization_code",
-        "redirect_uri": REDIRECT_URI, "code_verifier": verifier}).encode()
+        "redirect_uri": redirect, **({"code_verifier": verifier} if pkce else {})}).encode()
     request = urllib.request.Request(TOKEN_URL, data=body,
                                      headers={"Content-Type": "application/x-www-form-urlencoded"})
     try:
