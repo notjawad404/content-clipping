@@ -38,7 +38,7 @@
   "tiktok": {
     "video_id": null,
     "url": null,
-    "attempts": 0,
-    "last_error": null
+    "attempts": 1,
+    "last_error": "unaudited_client_can_only_post_to_private_accounts: Please review our integration guidelines at https://developers.tiktok.com/doc/content-sharing-guidelines/"
   }
 }
