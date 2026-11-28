@@ -30,6 +30,12 @@
   "media_id": null,
   "permalink": null,
   "youtube": {
+    "video_id": "dATwIUDx_FM",
+    "url": "https://www.youtube.com/shorts/dATwIUDx_FM",
+    "attempts": 0,
+    "last_error": null
+  },
+  "tiktok": {
     "video_id": null,
     "url": null,
     "attempts": 0,
